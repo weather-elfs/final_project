@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 환경·비밀정보 (커밋 금지)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# 데이터 (대용량 원본은 저장소에 넣지 않는다)
+data/raw/
+data/interim/
+data/processed/
+*.csv
+*.parquet
+*.xlsx
+
+# 비밀정보를 제거한 소형 테스트 fixture만 예외로 허용
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.parquet
+!tests/fixtures/**/*.xlsx
+
+# OS / 에디터
+.DS_Store
+.idea/
+
+# VSCode: 팀 공유 설정만 커밋하고 나머지는 무시
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
