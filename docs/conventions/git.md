@@ -26,9 +26,18 @@ hotfix/*   →  main (+ develop)
 
 ### 최초 `develop` 부트스트랩
 
-원격 `develop`이 아직 없으면 저장소 관리자가 GitHub에서 `main` 기준 브랜치를 만든
-직후 보호 규칙을 설정한다. GitHub에서 만들 수 없는 경우에만 사용자 승인을 받아 최초
-1회 push하고 즉시 보호한다. 이 절차 이후의 `develop` 직접 push는 금지한다.
+원격 `develop`이 없고 로컬 `develop`에 `main` 이후의 승인된 설계 커밋이 있으면,
+커밋 범위를 확인하고 사용자 승인을 받은 뒤 현재 로컬 `develop`을 최초 1회 push한다.
+그 직후 GitHub에서 Branch Protection Rules를 설정한다.
+
+```bash
+git log --oneline main..develop   # 최초 게시할 커밋 확인
+git push -u origin develop        # 사용자 승인 후 최초 1회만 실행
+```
+
+로컬 `develop`에 고유 커밋이 없을 때만 저장소 관리자가 GitHub에서 `main` 기준으로
+`develop`을 만들고 바로 보호한다. 이 부트스트랩은 원격 브랜치를 처음 만드는 경우에만
+허용하는 예외이며, 이후 `develop` 직접 push는 금지한다.
 
 ## 커밋 메시지 (Conventional Commits)
 
@@ -82,10 +91,11 @@ test: 전처리 함수 단위 테스트 추가
 - `pre-commit` 단계: Black 포맷 · isort 정렬 및 기본 파일 점검(공백·대용량 파일·머지 충돌 등).
 - `--no-verify`로 훅을 우회하는 것은 금지한다.
 
-설치:
+환경·패키지 관리 도구가 아직 정해지지 않았으므로 `pre-commit` 패키지 설치 명령은
+도구 확정 후 이 절에 추가한다. 아래 명령은 승인된 방식으로 `pre-commit`을 설치한
+뒤에만 실행한다.
 
 ```bash
-pip install pre-commit
 pre-commit install --install-hooks
 pre-commit install --hook-type commit-msg
 ```
@@ -102,7 +112,7 @@ pre-commit install --hook-type commit-msg
 ## pytest 검사 시점 (검토 중)
 
 테스트를 커밋/푸시 시점에 강제할지는 팀에서 결정한다. `docs/conventions/testing.md`
-참조. 결정 전까지 훅에서 pytest는 비활성(주석) 상태로 둔다.
+참조. 결정 전까지 pytest 훅은 추가하지 않고, 결정 후 선택한 단계에 추가한다.
 
 ## GitHub Actions (보류)
 
