@@ -20,8 +20,8 @@
 
 | 도구 | 로딩 방식 | 확인 명령·절차 | 검증일 | 결과 |
 | --- | --- | --- | --- | --- |
-| Google Antigravity | 워크스페이스의 Always On 규칙에서 루트 `AGENTS.md`를 `@`로 참조 | 저장소를 연 새 세션에서 아래 공통 확인 문구를 입력하고 응답의 파일 경로와 브랜치 규칙을 대조 | — | `NOT_TESTED` — 워크스페이스 규칙 어댑터 생성 전 |
-| Google Antigravity CLI | 활성 디렉터리의 `AGENTS.md`와 `GEMINI.md`를 자동 탐색 | 저장소 루트에서 `agy`를 시작한 뒤 아래 공통 확인 문구를 입력 | — | `NOT_TESTED` — 현재 `GEMINI.md`도 `AGENTS.md`를 import하므로 중복 로딩 여부 확인 필요 |
+| Google Antigravity | 활성 디렉터리의 `AGENTS.md` 자동 탐색 (별도 어댑터 불필요) | 저장소를 연 새 세션에서 아래 공통 확인 문구를 입력하고 응답의 파일 경로와 브랜치 규칙을 대조 | 2026-09-03 | `PASS` — 루트 `AGENTS.md` 직접 로딩 및 규칙 적용 확인 |
+| Google Antigravity CLI | 활성 디렉터리의 `AGENTS.md` 자동 탐색 | 저장소 루트에서 `agy`를 시작한 뒤 아래 공통 확인 문구를 입력 | — | `NOT_TESTED` |
 | OpenAI Codex Desktop | 저장소 계층의 `AGENTS.md`를 자동 탐색·병합 | 저장소를 연 새 작업에서 아래 공통 확인 문구를 입력 | 2026-09-03 | `PASS` — 현재 작업에서 루트 `AGENTS.md` 적용 확인 |
 | OpenAI Codex CLI | 저장소 계층의 `AGENTS.md`를 자동 탐색·병합 | 저장소 루트에서 `codex --ask-for-approval never "현재 적용 중인 프로젝트 지침 파일 경로와 초기 설계 단계의 작업 브랜치를 답해줘. 추측하지 마."` 실행 | — | `NOT_TESTED` |
 | Anthropic Claude Code Desktop | Code 탭이 프로젝트 `CLAUDE.md`를 읽고 `@AGENTS.md` import를 적용 | 저장소를 선택한 새 세션에서 `/memory`로 로딩 파일을 확인한 뒤 아래 공통 확인 문구를 입력 | — | `NOT_TESTED` |

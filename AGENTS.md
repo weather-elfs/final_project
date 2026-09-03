@@ -3,8 +3,8 @@
 > 이 문서는 **모든 AI 에이전트의 단일 진입점이자 전역 규칙 소스**다.
 > 팀원마다 다른 에이전트(Antigravity, Codex, Claude Code)를 쓰더라도
 > 작업은 반드시 이 문서에서 시작한다. 영역별 상세 규칙은 이 문서가 연결하는
-> `docs/` 문서를 원문으로 삼는다. 에이전트 전용 파일(`CLAUDE.md`, `GEMINI.md`)은
-> 공통 규칙을 복제하지 않는다.
+> `docs/` 문서를 원문으로 삼는다. 에이전트 전용 파일(`CLAUDE.md`)은 공통 규칙을
+> 복제하지 않는다.
 >
 > 지원 대상은 Google Antigravity(Desktop / CLI), OpenAI Codex(Desktop / CLI),
 > Anthropic Claude Code(Desktop / CLI)다. 모델과 모델 버전은 자유롭게 변경하며,
@@ -100,7 +100,7 @@
 
 ```
 AGENTS.md                     ← 전역 규칙과 문서의 단일 진입점
-CLAUDE.md / GEMINI.md         ← AGENTS.md를 불러오는 에이전트별 어댑터
+CLAUDE.md                     ← AGENTS.md를 불러오는 Claude Code 어댑터
 docs/
 ├── conventions/
 │   ├── general.md            ← PEP8, 파일명, 임포트(isort), 주석
