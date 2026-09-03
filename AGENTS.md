@@ -33,14 +33,14 @@
 
 > 아직 확정되지 않은 항목(확정 시 이 표를 갱신하고 관련 ADR을 추가한다):
 >
-> | 항목 | 상태 |
-> | --- | --- |
-> | 기상/가시도 데이터 출처 | **TBD** — 확정 후 `docs/research/`와 `docs/conventions/data.md` 갱신 |
-> | 대시보드 프레임워크 (Streamlit 등) | **TBD** — 확정 후 `docs/conventions/dashboard.md` 작성 |
-> | 6인 역할 분담 | **TBD** — 확정 후 `docs/agents/division-of-labor.md` 작성 |
-> | 환경·패키지 관리 도구 (conda / uv 등) | **TBD** |
-> | Python 린터 | **TBD** — 새 의존성 승인 후 자동 검사로 추가 |
-> | GitHub Actions | **보류** — 워크플로 파일을 만들지 않고 도입 시점만 문서에 기록 |
+> | 항목 | 상태 | 확정 시점 |
+> | --- | --- | --- |
+> | 기상/가시도 데이터 출처 | **TBD** — 확정 후 `docs/research/`와 `docs/conventions/data.md` 갱신 | 전체 기능 개발 착수 전 필수 |
+> | 대시보드 프레임워크 (Streamlit 등) | **TBD** — 확정 후 `docs/conventions/dashboard.md` 작성 | 착수 후 확정 가능 |
+> | 6인 역할 분담 | **TBD** — 확정 후 `docs/agents/division-of-labor.md` 작성 | 전체 기능 개발 착수 전 필수 |
+> | 환경·패키지 관리 도구 (conda / uv 등) | **TBD** | 전체 기능 개발 착수 전 필수 |
+> | Python 린터 | **TBD** — 새 의존성 승인 후 자동 검사로 추가 | 착수 후 확정 가능 |
+> | GitHub Actions | **보류** — 워크플로 파일을 만들지 않고 도입 시점만 문서에 기록 | 착수 후 확정 가능 |
 >
 > 코드 포맷/임포트는 **확정**: **Black**(기본 88자) + **isort(`profile="black"`)**,
 > VSCode 범용 포매터는 **Prettier**, 패키지 자동 import 사용. 린터는 도입 전이다.
