@@ -13,22 +13,16 @@ import re
 import sys
 from pathlib import Path
 
-TYPES = (
-    "feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert"
-)
+TYPES = "feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert"
 
 # 예: "feat: 가시도 수집 추가", "test(preprocess): 결측 처리 테스트"
-PATTERN = re.compile(
-    rf"^(?:{TYPES})(?:\([^)]+\))?: (?P<description>.+)$"
-)
+PATTERN = re.compile(rf"^(?:{TYPES})(?:\([^)]+\))?: (?P<description>.+)$")
 
 # 설명의 한글 포함 여부
 HANGUL = re.compile(r"[가-힣]")
 
 # 이모지(주요 구간) 탐지
-EMOJI = re.compile(
-    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]"
-)
+EMOJI = re.compile("[\U0001f300-\U0001faff\U00002600-\U000027bf\U0001f1e6-\U0001f1ff]")
 
 
 def main() -> int:
@@ -37,9 +31,7 @@ def main() -> int:
         return 1
 
     msg = Path(sys.argv[1]).read_text(encoding="utf-8")
-    subject = next(
-        (line for line in msg.splitlines() if line.strip()), ""
-    )
+    subject = next((line for line in msg.splitlines() if line.strip()), "")
 
     errors = []
     match = PATTERN.fullmatch(subject)

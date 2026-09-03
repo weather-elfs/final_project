@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 CHECKER = Path(__file__).parents[1] / "scripts" / "check_commit_msg.py"
 
 
