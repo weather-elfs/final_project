@@ -1,0 +1,52 @@
+# 이 파일은 설치한 개발 환경에서 실행되는 로컬 Git 훅을 정의한다.
+# 저장소 전체의 강제 수단은 아니므로 모든 팀원이 아래 훅을 설치해야 한다.
+#
+# 설치:
+#   pip install pre-commit
+#   pre-commit install --install-hooks
+#   pre-commit install --hook-type commit-msg
+#
+# 전체 검사(수동): pre-commit run --all-files
+#
+# GitHub Actions 연동은 현재 보류한다. 팀에서 확정하면
+# .github/workflows/ci.yml에서 pre-commit과 pytest를 실행한다.
+
+repos:
+  # 기본 파일 점검
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=5120"]
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+
+  # 임포트 정렬 (pyproject.toml의 profile = "black")
+  - repo: https://github.com/PyCQA/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        args: ["--settings-path=pyproject.toml"]
+
+  # 코드 포맷 (Black 기본 88자)
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+
+  # 커밋 메시지 형식 검사 (commit-msg 단계)
+  - repo: local
+    hooks:
+      - id: check-commit-msg
+        name: check commit message (Conventional Commits)
+        entry: python scripts/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
+
+# 린터와 pytest 훅은 도구 및 실행 시점을 확정한 뒤 추가한다.
+# pytest를 pre-push에서 실행하려면 stages: [pre-push]인 local 훅을 추가하고
+# pre-commit install --hook-type pre-push를 실행해야 한다.
