@@ -10,16 +10,16 @@ hotfix/*   →  main (+ develop)
 | 브랜치 | 용도 |
 | --- | --- |
 | `main` | 배포 브랜치. `develop`·`hotfix/*`에서만 머지. 직접 push 금지. |
-| `develop` | 다음 버전 통합 브랜치. 초기 설계·공통 설정 단계의 작업 브랜치. 직접 push 금지. |
+| `develop` | 다음 버전 통합 브랜치. 초기 문서 기준선의 최초 게시 전 작업 브랜치. 직접 push 금지. |
 | `feature/<기능>` | 기능 개발 (예: `feature/visibility-ingest`). `develop`에서 분기·병합. |
 | `hotfix/<내용>` | 운영 긴급 수정. `main`에서 분기, `main`+`develop`에 병합. |
 
 > `release/*` 브랜치는 사용하지 않는다. `develop`이 준비되면 바로 `main`으로 배포한다.
 
-- 초기 설계·공통 설정이 끝나고 팀원 역할 분담과 첫 작업 배정이 시작되기 전까지는
+- 이 문서가 포함된 초기 설계·공통 설정 묶음을 원격 `develop`에 최초 게시할 때까지만
   `develop`에서 작업한다.
-- 역할 분담 이후의 새 기능은 최신 `develop`에서 `feature/*`를 분기하고, 완료 후
-  `develop`으로 PR을 올린다.
+- 기준선 게시 이후의 데이터 출처 조사·스키마·대시보드 설계·기능 코드는 모두 최신
+  `develop`에서 `feature/*`를 분기하고, 완료 후 `develop`으로 PR을 올린다.
 - `main`·`develop`에는 로컬에서 직접 머지하지 않는다. **PR로만** 병합한다.
 - 저장소 설정에서 `main`·`develop`에 Branch Protection Rules를 설정하고 리뷰 승인을
   요구한다. GitHub Actions 도입 후에는 CI 성공도 필수 검사로 연결한다.
