@@ -17,6 +17,11 @@ __pycache__/
 venv/
 env/
 
+# 프론트엔드 의존성 / 빌드 산출물
+node_modules/
+dist/
+storybook-static/
+
 # 데이터 (대용량 원본은 저장소에 넣지 않는다)
 data/raw/
 data/interim/

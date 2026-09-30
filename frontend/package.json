@@ -1,0 +1,41 @@
+{
+  "name": "weather-ground-station-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "tsx --test src/api.test.ts src/features/dashboard/dashboardAdapter.test.ts src/features/dashboard/gradeTones.test.ts",
+    "typecheck": "tsc --noEmit",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "msw": "^2.11.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "^10.6.1",
+    "@storybook/react-vite": "^10.6.1",
+    "@types/leaflet": "^1.9.22",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "msw-storybook-addon": "^3.0.3",
+    "storybook": "^10.6.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^7.1.7"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}
