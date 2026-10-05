@@ -8,5 +8,5 @@ export default function App() {
   const clearAuthentication = useCallback(() => setAuthenticated(false), []);
 
   if (!authenticated) return <LoginPage onAuthenticated={() => setAuthenticated(true)} />;
-  return <DashboardPage onLogout={clearAuthentication} onUnauthorized={clearAuthentication} />;
+  return <DashboardPage onUnauthorized={clearAuthentication} />;
 }

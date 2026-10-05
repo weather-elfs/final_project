@@ -1,68 +1,64 @@
-import { formatKst, isFiniteNumber, metric, statusLabels } from '../formatters';
-import { aqiGradeTone, displayAqiGrade, fogGradeTone } from '../gradeTones';
+import { aqiGradeTone, fogGradeTone, fogStageLabel } from '../gradeTones';
+import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
 
-const SOURCE_LABELS: Record<string, string> = {
-  ASOS: 'ASOS',
-  BUOY: '해양부이',
-  AIRKOREA: '에어코리아',
-  SATELLITE: '천리안',
-};
+function weatherGlyph(label?: string) {
+  if (label?.includes('비')) return '☂';
+  if (label?.includes('맑')) return '☀';
+  if (label?.includes('구름') || label?.includes('흐림')) return '☁';
+  return '≡';
+}
 
-const SOURCE_TONES: Record<string, string> = {
-  ASOS: 'blue', BUOY: 'blue', AIRKOREA: 'yellow', SATELLITE: 'red',
-};
+function fogImpact(label: string) {
+  if (label === '짙은 안개') return '짙은 안개 · 200–500 m';
+  return label;
+}
 
-export default function VisibilitySummary({ dashboard, horizonH }: { dashboard: DashboardData | null; horizonH: number }) {
-  const { current, selectedForecast: future, diagnosis, sourceStatus = [], station, meta } = dashboard ?? {};
-  const currentVisibility = current?.visibilityKm;
-  const futureVisibility = future?.visibilityPredKm;
-  const delta = isFiniteNumber(currentVisibility) && isFiniteNumber(futureVisibility)
-    ? futureVisibility - currentVisibility : null;
-  const fogLabel = diagnosis?.fogLabel ?? '판단 대기';
-  const aqiLabel = displayAqiGrade(diagnosis?.pmDisplayGrade);
+export default function VisibilitySummary({ dashboard, loading, onRefresh }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void }) {
+  const current = dashboard?.current;
+  const diagnosis = dashboard?.diagnosis;
+  const lastRefreshAt = dashboard?.meta?.generatedAt ?? current?.observedAt;
+  const errors = dashboard?.apiStatus?.summary?.fail ?? 0;
+  const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
+  const statusLabel = errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
+  const statusTone = errors ? 'error' : delayed ? 'delayed' : 'good';
+  const fogLabel = diagnosis?.fogLabel ?? current?.fogGradeLabel ?? '판단 대기';
+  const aqiLabel = current?.aqi?.displayGrade ?? diagnosis?.pmDisplayGrade ?? '판단 대기';
+  const fogDetail = fogImpact(fogLabel);
 
   return (
-    <section className="panel evidence-panel" aria-labelledby="evidence-title">
-      <div className="panel-header evidence-header">
-        <div><h2 id="evidence-title">현재 / 예측 시정</h2><p>{station?.stationName ?? '관측소 선택 대기'}</p></div>
-        <span className="evidence-delay">{meta?.partial ? '일부 자료 지연' : '자료 정상'}</span>
+    <section className="panel current-weather-panel" aria-labelledby="current-weather-title">
+      <div className="panel-header current-weather-header">
+        <h2 id="current-weather-title">현재 기상</h2>
+        <div className="observation-actions">
+          <div className="observation-meta">
+            <div className="observation-status"><strong><span className={`status-${statusTone}`}>●</span> 데이터 상태 · {statusLabel}</strong><span className="status-info">ⓘ</span></div>
+            <span className="observation-time">갱신 시각 {formatKstTime(lastRefreshAt)} KST</span>
+          </div>
+          <button type="button" className="refresh-button" onClick={onRefresh} disabled={loading} aria-label="현재 관측 갱신"><img src="/figma-assets/refresh.svg" alt="" /></button>
+        </div>
       </div>
 
-      <div className="comparison-grid">
-        <article><span>현재 관측 · {formatKst(current?.observedAt)}</span><strong>{metric(currentVisibility, 'km', 1)}</strong><small>{current?.status ? statusLabels[current.status] ?? current.status : '대기'}</small></article>
-        <article><span>+{horizonH}시간 예측 · {formatKst(future?.validAt)}</span><strong>{metric(futureVisibility, 'km', 1)}</strong><small>{future?.status ? statusLabels[future.status] ?? future.status : '대기'}</small></article>
-        <article className={delta !== null && delta < 0 ? 'negative' : ''}><span>변화량 (예측−현재)</span><strong>{delta === null ? '판단 불가' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} km`}</strong><small>{delta === null ? '자료 확인 필요' : delta < 0 ? '시정 감소 예상' : '시정 유지·개선'}</small></article>
+      <div className="weather-metrics">
+        <article><b>날씨</b><strong>{current?.weatherLabel?.includes('안개') ? <img className="weather-icon" src="/figma-assets/weather-fog.png" alt="" /> : <span className="weather-glyph" aria-hidden="true">{weatherGlyph(current?.weatherLabel)}</span>}{current?.weatherLabel ?? '자료 없음'}</strong><small>시정 {metric(current?.visibilityKm, 'km', 1)}</small></article>
+        <article><b>기온</b><strong>{current?.temperatureC == null ? '자료 없음' : <><span>{current.temperatureC.toFixed(0)}</span><span className="weather-unit">°C</span></>}</strong><small>현재 기온</small></article>
+        <article><b>풍향</b><strong><img className="wind-arrow" src="/figma-assets/wind-direction.png" style={{ rotate: `${current?.windDirectionDeg ?? 0}deg` }} alt="" />{current?.windDirectionLabel ?? '자료 없음'}</strong><small>{current?.windDirectionDeg == null ? '방향 없음' : `${current.windDirectionDeg}°`}</small></article>
+        <article><b>풍속</b><strong>{current?.windSpeedMS == null ? '자료 없음' : <><span>{current.windSpeedMS.toFixed(1)}</span><span className="weather-unit"> m/s</span></>}</strong><small>{current?.windSpeedMS == null ? '자료 없음' : current.windSpeedMS <= 4.5 ? '약한 바람' : '보통 바람'}</small></article>
       </div>
 
-      <div className="diagnosis-heading">
-        <h3>저시정 원인 진단</h3>
-        <span>관측 근거와 모델 영향도를 분리해 판단</span>
-      </div>
-      <div className="diagnosis-row">
-        <article>
-          <div><strong>안개 가능성</strong><span>현재·예측 자료 기반 판정</span></div>
-          <b className={`diagnosis-grade grade-tone-${fogGradeTone(fogLabel)}`}>{fogLabel}</b>
-        </article>
-        <article>
-          <div><strong>미세먼지 영향</strong><span>PM2.5 {metric(current?.pm25UgM3, 'µg/m³')}</span></div>
-          <b className={`diagnosis-grade grade-tone-${aqiGradeTone(diagnosis?.pmDisplayGrade)}`}>{aqiLabel}</b>
-        </article>
+      <div className="impact-title"><h3>시정 영향 요인 ⓘ</h3></div>
+      <div className="impact-grid">
+        <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGradeTone(fogLabel)}`}>{fogStageLabel(fogLabel)}</b></article>
+        <article><div><strong>대기질</strong><span>AQI {current?.aqi?.value ?? '—'} · {aqiLabel}</span></div><b className={`factor-stage grade-tone-${aqiGradeTone(aqiLabel)}`}>{current?.aqi?.displayLevel ?? '—'}/5단계</b></article>
       </div>
       <p className="diagnosis-summary">종합 추정: {diagnosis?.summary ?? '데이터 대기'}</p>
 
-      <div className="related-heading">
-        <h3>대기질 · 안개 관련 요소</h3>
-        <span>확정 원인이 아닌 현재 관측·예측 기반 추정</span>
-      </div>
+      <h3 className="related-title">시정 관련 관측 지표</h3>
       <div className="metric-grid">
         <div><span>PM2.5</span><strong>{metric(current?.pm25UgM3, 'µg/m³')}</strong></div>
         <div><span>PM10</span><strong>{metric(current?.pm10UgM3, 'µg/m³')}</strong></div>
         <div><span>상대습도</span><strong>{metric(current?.relativeHumidityPct, '%')}</strong></div>
         <div><span>기온−이슬점</span><strong>{metric(current?.temperatureDewpointSpreadC, '°C', 1)}</strong></div>
-      </div>
-      <div className="source-strip">
-        {sourceStatus.map((source) => <span key={source.source}><i className={`source-dot-${SOURCE_TONES[source.source] ?? 'gray'}`} />{SOURCE_LABELS[source.source] ?? source.source}</span>)}
       </div>
     </section>
   );

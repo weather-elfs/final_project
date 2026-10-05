@@ -8,6 +8,6 @@ const meta = { title: 'Dashboard/Integration/DashboardPage', component: Dashboar
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const MockedApi: Story = {
-  args: { onLogout: noop, onUnauthorized: noop },
+  args: { mapTilesEnabled: false, onUnauthorized: noop },
   beforeEach({ msw }) { msw.use(...handlers); },
 };

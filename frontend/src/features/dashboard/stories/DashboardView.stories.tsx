@@ -7,8 +7,9 @@ const meta = { title: 'Dashboard/DashboardView', component: DashboardView, param
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-const defaultArgs = { config, dashboard, values, onChange: noop, onRefresh: noop, onLogout: noop };
+const defaultArgs = { config, missionStations: config.stations, dashboard, mapMode: 'current' as const, mapTilesEnabled: false, values, onChange: noop, onMapModeChange: noop, onMapViewportChange: noop, onStationSelect: noop, onRefresh: noop, onSubmit: noop };
 export const Default: Story = { args: defaultArgs };
+export const ForecastReady: Story = { args: { ...defaultArgs, values: { stationId: '112', forecastIntervalH: 6, missionType: 'MARITIME_TRANSPORT' }, forecastRequested: true } };
 export const PartialData: Story = { args: { ...defaultArgs, dashboard: { ...dashboard, meta: { ...dashboard.meta, partial: true }, current: { ...dashboard.current, pm25UgM3: null } } } };
-export const Loading: Story = { args: { ...defaultArgs, dashboard: null, loading: true } };
+export const Loading: Story = { args: { ...defaultArgs, loading: true } };
 export const Error: Story = { args: { ...defaultArgs, dashboard: null, error: '관측 데이터를 불러오지 못했습니다. (요청 ID: story-error)' } };

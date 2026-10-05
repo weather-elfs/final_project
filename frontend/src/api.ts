@@ -16,9 +16,16 @@ interface ApiErrorOptions {
 
 export interface DashboardRequest {
   stationId: string;
-  horizonH: number;
+  forecastIntervalH: number;
   missionType: string;
-  minimumVisibilityKm: number;
+}
+
+export interface MapViewport {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  zoom: number;
 }
 
 export class ApiError extends Error {
@@ -69,12 +76,10 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
   return payload;
 }
 
-export function buildDashboardUrl({ stationId, horizonH, missionType, minimumVisibilityKm }: DashboardRequest) {
+export function buildDashboardUrl({ stationId, forecastIntervalH, missionType }: DashboardRequest) {
   const query = new URLSearchParams({
-    horizon_h: String(horizonH),
-    history_hours: '3',
+    forecast_interval_h: String(forecastIntervalH),
     mission_type: missionType,
-    minimum_visibility_km: String(minimumVisibilityKm),
   });
 
   return `/api/v1/stations/${encodeURIComponent(stationId)}/dashboard?${query}`;

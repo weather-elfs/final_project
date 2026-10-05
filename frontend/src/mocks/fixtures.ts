@@ -1,28 +1,32 @@
-type ForecastSnapshot = [visibilityKm: number, pm25: number, pm10: number, fogLabel: string];
-
 interface StationSnapshot {
-  station: { station_id: string; station_name: string };
+  station: { station_id: string; station_name: string; latitude: number; longitude: number };
   current: {
     visibility_km: number;
+    pm1_ug_m3: number;
     pm25_ug_m3: number;
     pm10_ug_m3: number;
+    temperature_c: number;
+    wind_direction_deg: number;
+    wind_direction_label: string;
+    wind_speed_m_s: number;
     relative_humidity_pct: number;
     temperature_dewpoint_spread_c: number;
+    weather_label: string;
+    fog_grade_label: string;
   };
-  forecasts: { 1: ForecastSnapshot; 6: ForecastSnapshot };
-  history: [number, number, number];
 }
+const OBSERVED_AT = '2026-09-18T09:00:00+09:00';
 
 export const dashboardConfig = {
   code: 'SUCCESS',
   message: '대시보드 설정을 조회했습니다.',
   data: {
     stations: [
-      { station_id: '102', station_name: '백령도', latitude: 37.97396, longitude: 124.71237, available: true },
-      { station_id: '112', station_name: '인천', latitude: 37.47772, longitude: 126.6249, available: true },
-      { station_id: '201', station_name: '강화', latitude: 37.70739, longitude: 126.44634, available: true },
+      { station_id: '102', station_name: '백령도', latitude: 37.97396, longitude: 124.71237, available: true, current_status: 'GOOD', forecast_status: 'GOOD' },
+      { station_id: '112', station_name: '인천', latitude: 37.47772, longitude: 126.6249, available: true, current_status: 'GOOD', forecast_status: 'RETRY_SUCCESS' },
+      { station_id: '201', station_name: '강화', latitude: 37.70739, longitude: 126.44634, available: true, current_status: 'GOOD', forecast_status: 'GOOD' },
     ],
-    forecast_horizons_h: [1, 6],
+    forecast_interval_options_h: [1, 3, 6, 12],
     mission_types: [
       {
         mission_type: 'MARITIME_TRANSPORT',
@@ -39,104 +43,100 @@ export const dashboardConfig = {
         required_metrics: ['visibility_pred_km', 'wind_speed_pred_m_s'],
       },
     ],
-    meta: { request_id: 'req_20260930_000002', partial: false },
+    meta: { request_id: 'req_20260918_000002', generated_at: OBSERVED_AT, partial: false },
   },
 };
 
 const stationSnapshots: Record<string, StationSnapshot> = {
   '102': {
-    station: { station_id: '102', station_name: '백령도' },
-    current: { visibility_km: 7.2, pm25_ug_m3: 18, pm10_ug_m3: 31, relative_humidity_pct: 76, temperature_dewpoint_spread_c: 3.4 },
-    forecasts: { 1: [6.9, 19, 32, '박무'], 6: [5.8, 22, 36, '박무'] },
-    history: [7.8, 7.6, 7.4],
+    station: { station_id: '102', station_name: '백령도', latitude: 37.97396, longitude: 124.71237 },
+    current: { visibility_km: 7.2, pm1_ug_m3: 9, pm25_ug_m3: 18, pm10_ug_m3: 31, temperature_c: 17, wind_direction_deg: 280, wind_direction_label: '서풍', wind_speed_m_s: 5.1, relative_humidity_pct: 76, temperature_dewpoint_spread_c: 3.4, weather_label: '구름많음', fog_grade_label: '옅은 안개' },
   },
   '112': {
-    station: { station_id: '112', station_name: '인천' },
-    current: { visibility_km: 4.8, pm25_ug_m3: 27, pm10_ug_m3: 44, relative_humidity_pct: 81, temperature_dewpoint_spread_c: 2.8 },
-    forecasts: { 1: [4.5, 28, 45, '박무'], 6: [3.9, 30, 48, '안개 가능'] },
-    history: [5.1, 5.0, 4.9],
+    station: { station_id: '112', station_name: '인천', latitude: 37.47772, longitude: 126.6249 },
+    current: { visibility_km: 4.8, pm1_ug_m3: 12, pm25_ug_m3: 27, pm10_ug_m3: 44, temperature_c: 18, wind_direction_deg: 315, wind_direction_label: '북서풍', wind_speed_m_s: 4.2, relative_humidity_pct: 81, temperature_dewpoint_spread_c: 2.8, weather_label: '안개', fog_grade_label: '짙은 안개' },
   },
   '201': {
-    station: { station_id: '201', station_name: '강화' },
-    current: { visibility_km: 3.6, pm25_ug_m3: 34, pm10_ug_m3: 53, relative_humidity_pct: 88, temperature_dewpoint_spread_c: 1.6 },
-    forecasts: { 1: [3.3, 35, 54, '박무'], 6: [2.6, 39, 58, '안개 가능'] },
-    history: [4.2, 4.0, 3.8],
+    station: { station_id: '201', station_name: '강화', latitude: 37.70739, longitude: 126.44634 },
+    current: { visibility_km: 3.6, pm1_ug_m3: 17, pm25_ug_m3: 34, pm10_ug_m3: 53, temperature_c: 16, wind_direction_deg: 260, wind_direction_label: '서풍', wind_speed_m_s: 2.8, relative_humidity_pct: 88, temperature_dewpoint_spread_c: 1.6, weather_label: '박무', fog_grade_label: '안개' },
   },
 };
 
-export function dashboardFixture(stationId: string, horizonH: number, minimumVisibilityKm: number) {
+function validAt(horizonH: number) {
+  return new Date(new Date(OBSERVED_AT).getTime() + horizonH * 3_600_000).toISOString();
+}
+
+function forecastPoint(snapshot: StationSnapshot, horizonH: number, slot: number) {
+  const visibility = Math.max(0.2, snapshot.current.visibility_km - slot * 0.25);
+  return {
+    horizon_h: horizonH,
+    valid_at: validAt(horizonH),
+    visibility_pred_km: Number(visibility.toFixed(1)),
+    pm1_pred_ug_m3: snapshot.current.pm1_ug_m3 + slot,
+    pm25_pred_ug_m3: snapshot.current.pm25_ug_m3 + slot * 2,
+    pm10_pred_ug_m3: snapshot.current.pm10_ug_m3 + slot * 2,
+    temperature_c: snapshot.current.temperature_c + (slot < 3 ? slot : 1),
+    wind_direction_deg: snapshot.current.wind_direction_deg,
+    wind_direction_label: snapshot.current.wind_direction_label,
+    wind_speed_m_s: Number((snapshot.current.wind_speed_m_s + slot * 0.2).toFixed(1)),
+    weather_label: slot > 2 ? '흐림' : snapshot.current.weather_label,
+    fog_grade_label: visibility < 1 ? '안개' : visibility < 4 ? '안개 가능' : '옅은 안개',
+    aqi: { value: 84 + slot * 8, display_level: slot > 2 ? 2 : 1, display_grade: slot > 2 ? '민감군 주의' : '양호', status: 'calculated' },
+    status: 'fresh',
+  };
+}
+
+export function dashboardFixture(stationId: string, forecastIntervalH: number) {
   const snapshot = stationSnapshots[stationId];
   if (!snapshot) return null;
-
-  const selected = snapshot.forecasts[horizonH as 1 | 6] ?? snapshot.forecasts[6];
-  if (!selected) return null;
-  const passed = selected[0] >= minimumVisibilityKm;
-  const observedAt = '2026-09-30T09:00:00+09:00';
-  const validAt = horizonH === 1 ? '2026-09-30T10:00:00+09:00' : '2026-09-30T15:00:00+09:00';
+  const forecastTimeline = [1, 2, 3, 4].map((slot) => forecastPoint(snapshot, forecastIntervalH * slot, slot));
+  const minimumVisibility = Math.min(...forecastTimeline.map((point) => point.visibility_pred_km));
+  const passed = minimumVisibility >= 1;
 
   return {
     code: 'PARTIAL_SUCCESS',
     message: '일부 자료가 재시도 후 수집되어 사용 가능한 결과를 반환했습니다.',
     data: {
-      station: snapshot.station,
+      station: { station_id: snapshot.station.station_id, station_name: snapshot.station.station_name },
       request_context: {
-        horizon_h: horizonH,
-        history_hours: 3,
+        forecast_interval_h: forecastIntervalH,
+        forecast_horizons_h: forecastTimeline.map((point) => point.horizon_h),
         mission_type: 'MARITIME_TRANSPORT',
-        minimum_visibility_km: minimumVisibilityKm,
       },
       current: {
-        observed_at: observedAt,
+        observed_at: OBSERVED_AT,
         ...snapshot.current,
         aqi: { value: 84, display_level: 1, display_grade: '양호', status: 'calculated' },
         status: 'fresh',
       },
-      selected_forecast: {
-        base_time: observedAt,
-        horizon_h: horizonH,
-        valid_at: validAt,
-        visibility_pred_km: selected[0],
-        pm25_pred_ug_m3: selected[1],
-        pm10_pred_ug_m3: selected[2],
-        fog_grade_code: selected[3] === '박무' ? 'MIST' : 'FOG_POSSIBLE',
-        fog_grade_label: selected[3],
-        aqi: { value: 84, display_level: 1, display_grade: '양호', status: 'calculated' },
-        status: 'ready',
-      },
-      forecast_timeline: [
-        { horizon_h: 1, visibility_pred_km: snapshot.forecasts[1][0], fog_grade_label: snapshot.forecasts[1][3], aqi: { display_grade: '양호' } },
-        { horizon_h: 6, visibility_pred_km: snapshot.forecasts[6][0], fog_grade_label: snapshot.forecasts[6][3], aqi: { display_grade: '양호' } },
-      ],
-      history: [
-        { observed_at: '2026-09-30T06:00:00+09:00', visibility_km: snapshot.history[0] },
-        { observed_at: '2026-09-30T07:00:00+09:00', visibility_km: snapshot.history[1] },
-        { observed_at: '2026-09-30T08:00:00+09:00', visibility_km: snapshot.history[2] },
-      ],
+      forecast_timeline: forecastTimeline,
       mission_evaluation: {
         mission_type: 'MARITIME_TRANSPORT',
         rule_version: 'maritime-transport-v1',
         evaluation_status: 'EVALUATED',
         passed,
         mission_grade: passed ? 'NORMAL' : 'RESTRICTED',
-        factors: [{ metric: 'visibility_pred_km', actual: selected[0], operator: '>=', threshold: minimumVisibilityKm, unit: 'km', required: true, passed }],
+        factors: [{ metric: 'visibility_pred_km', actual: minimumVisibility, operator: '>=', threshold: 1, unit: 'km', required: true, passed }],
         reason_codes: [passed ? 'VISIBILITY_OK' : 'VISIBILITY_BELOW_MINIMUM'],
       },
-      diagnosis: { fog_label: selected[3] === '안개 가능' ? '안개' : selected[3], pm_display_grade: '좋음', summary: '안개 영향 우세 · 미세먼지는 보조 요인' },
+      diagnosis: { fog_label: snapshot.current.fog_grade_label, pm_display_grade: '양호', summary: '안개 영향 우세 · 대기질은 보조 요인' },
       source_status: [
-        { source: 'ASOS', status: 'fresh', observed_at: observedAt },
-        { source: 'AIRKOREA', status: 'fresh', observed_at: observedAt },
-        { source: 'BUOY', status: 'delayed', observed_at: '2026-09-30T08:00:00+09:00' },
-        { source: 'SATELLITE', status: 'fresh', observed_at: observedAt },
+        { source: 'ASOS', status: 'fresh', observed_at: OBSERVED_AT },
+        { source: 'AIRKOREA', status: 'fresh', observed_at: OBSERVED_AT },
+        { source: 'BUOY', status: 'failed', observed_at: '2026-09-18T08:00:00+09:00' },
+        { source: 'KMA', status: 'fresh', observed_at: OBSERVED_AT },
       ],
       api_status: {
-        overall: { code: 'RETRY_SUCCESS', label: 'Retry Success' },
+        overall: { code: 'FAIL', label: 'Fail' },
+        summary: { good: 3, delayed: 0, fail: 1 },
         sources: [
-          { source: 'ASOS', code: 'GOOD', label: 'Good', attempts: 1 },
-          { source: 'AIRKOREA', code: 'GOOD', label: 'Good', attempts: 1 },
-          { source: 'BUOY', code: 'RETRY_SUCCESS', label: 'Retry Success', attempts: 2 },
+          { source: 'ASOS', display_name: '기상청 ASOS', code: 'GOOD', label: 'Good', attempts: 1 },
+          { source: 'AIRKOREA', display_name: '에어코리아', code: 'GOOD', label: 'Good', attempts: 1 },
+          { source: 'BUOY', display_name: '해양기상부이', code: 'FAIL', label: 'Fail', attempts: 3 },
+          { source: 'KMA', display_name: '기상청 단기예보', code: 'GOOD', label: 'Good', attempts: 1 },
         ],
       },
-      meta: { request_id: `req_20260930_${stationId}_${horizonH}`, generated_at: '2026-09-30T09:05:00+09:00', partial: true },
+      meta: { request_id: `req_20260918_${stationId}_${forecastIntervalH}`, generated_at: '2026-09-18T09:05:00+09:00', partial: true },
     },
   };
 }

@@ -1,4 +1,5 @@
-import type { DashboardConfig } from './types';
+import type { MapViewport } from '../../api';
+import type { DashboardConfig, DashboardStation } from './types';
 
 function camelizeKey(key: string) {
   return key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -21,4 +22,14 @@ export function toDashboardConfig(payload: unknown): DashboardConfig {
       .map((station) => ({ ...station, id: station.stationId, name: station.stationName })),
     missionTypes: (config.missionTypes ?? []).filter((mission) => mission.enabled),
   };
+}
+
+export function stationsInViewport(stations: DashboardStation[], viewport: MapViewport | null) {
+  if (!viewport) return stations;
+  return stations.filter((station) => (
+    station.longitude >= viewport.west
+    && station.longitude <= viewport.east
+    && station.latitude >= viewport.south
+    && station.latitude <= viewport.north
+  ));
 }

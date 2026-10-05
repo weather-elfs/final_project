@@ -5,14 +5,12 @@ import { ApiError, buildDashboardUrl, request } from './api';
 
 test('대시보드 URL에 명세의 통합 조회 조건을 모두 포함한다', () => {
   const url = new URL(buildDashboardUrl({
-    stationId: '112', horizonH: 6, missionType: 'MARITIME_TRANSPORT', minimumVisibilityKm: 1,
+    stationId: '112', forecastIntervalH: 6, missionType: 'MARITIME_TRANSPORT',
   }), 'https://example.test');
 
   assert.equal(url.pathname, '/api/v1/stations/112/dashboard');
-  assert.equal(url.searchParams.get('horizon_h'), '6');
-  assert.equal(url.searchParams.get('history_hours'), '3');
+  assert.equal(url.searchParams.get('forecast_interval_h'), '6');
   assert.equal(url.searchParams.get('mission_type'), 'MARITIME_TRANSPORT');
-  assert.equal(url.searchParams.get('minimum_visibility_km'), '1');
 });
 
 test('HTTP 200 오류 응답도 코드와 요청 ID를 보존해 거부한다', async (t) => {

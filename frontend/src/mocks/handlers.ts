@@ -23,22 +23,21 @@ export const handlers = [
   http.get('/api/v1/stations/:stationId/dashboard', async ({ params, request }) => {
     const stationId = String(params.stationId);
     const url = new URL(request.url);
-    const horizonH = Number(url.searchParams.get('horizon_h'));
-    const minimumVisibilityKm = Number(url.searchParams.get('minimum_visibility_km'));
+    const forecastIntervalH = Number(url.searchParams.get('forecast_interval_h'));
     const missionType = url.searchParams.get('mission_type');
     await delay(300);
 
     if (!dashboardConfig.data.stations.some((station) => station.station_id === stationId && station.available)) {
-      return apiError('STATION_NOT_FOUND', '지원하지 않는 관측소입니다.', { station_id: stationId, meta: { request_id: 'req_20260930_000010' } });
+      return apiError('STATION_NOT_FOUND', '지원하지 않는 관측소입니다.', { station_id: stationId, meta: { request_id: 'req_20260918_000010' } });
     }
-    if (!dashboardConfig.data.forecast_horizons_h.includes(horizonH) || !Number.isFinite(minimumVisibilityKm) || minimumVisibilityKm < 0.1 || minimumVisibilityKm > 50) {
-      return apiError('INVALID_PARAMETER', '예측 시간 또는 최소 시정 기준을 확인하세요.', { meta: { request_id: 'req_20260930_000011' } });
+    if (!dashboardConfig.data.forecast_interval_options_h.includes(forecastIntervalH)) {
+      return apiError('INVALID_PARAMETER', '예측 간격을 확인하세요.', { meta: { request_id: 'req_20260918_000011' } });
     }
     if (!dashboardConfig.data.mission_types.some((mission) => mission.mission_type === missionType && mission.enabled)) {
-      return apiError('MISSION_TYPE_NOT_SUPPORTED', '지원하지 않는 임무 유형입니다.', { mission_type: missionType, meta: { request_id: 'req_20260930_000012' } });
+      return apiError('MISSION_TYPE_NOT_SUPPORTED', '지원하지 않는 임무 유형입니다.', { mission_type: missionType, meta: { request_id: 'req_20260918_000012' } });
     }
 
-    const fixture = dashboardFixture(stationId, horizonH, minimumVisibilityKm);
+    const fixture = dashboardFixture(stationId, forecastIntervalH);
     return fixture ? HttpResponse.json(fixture) : apiError('MODEL_UNAVAILABLE', '예측 자료를 생성하지 못했습니다.');
   }),
 ];
