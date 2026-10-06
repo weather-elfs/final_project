@@ -1,3 +1,5 @@
+import { gk2aFogLayer } from './gk2aFogLayer';
+
 interface StationSnapshot {
   station: { station_id: string; station_name: string; latitude: number; longitude: number };
   current: {
@@ -43,6 +45,7 @@ export const dashboardConfig = {
         required_metrics: ['visibility_pred_km', 'wind_speed_pred_m_s'],
       },
     ],
+    fog_layer: gk2aFogLayer,
     meta: { request_id: 'req_20260918_000002', generated_at: OBSERVED_AT, partial: false },
   },
 };

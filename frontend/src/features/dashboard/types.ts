@@ -20,10 +20,36 @@ export interface MissionType {
   requiredMetrics: string[];
 }
 
+export interface FogLayerCell {
+  id: string;
+  fogClass: number;
+  positions: Array<[number, number]>;
+}
+
+export interface FogLayerLegendItem {
+  value: number;
+  label: string;
+  color: string;
+}
+
+export interface FogMapLayer {
+  source: string;
+  observedAt: string;
+  projection: string;
+  resolutionKm: number;
+  quality: {
+    field: string;
+    acceptedValues: number[];
+  };
+  legend: FogLayerLegendItem[];
+  cells: FogLayerCell[];
+}
+
 export interface DashboardConfig {
   stations: DashboardStation[];
   forecastIntervalOptionsH: number[];
   missionTypes: MissionType[];
+  fogLayer?: FogMapLayer;
   meta?: { requestId?: string; generatedAt?: string; partial?: boolean };
 }
 

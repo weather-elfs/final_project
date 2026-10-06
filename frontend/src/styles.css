@@ -434,6 +434,52 @@
   border-radius: 6px;
   background: #dfe9e5;
 }
+.fog-layer-toggle {
+  position: absolute;
+  z-index: 500;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid #d8dde6;
+  border-radius: 0.5rem;
+  color: #4b5563;
+  background: #ffffffeb;
+  box-shadow: 0 1px 3px #0f17291f;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.fog-layer-toggle i {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 0.125rem;
+  background: #7a001f;
+  opacity: 0.35;
+}
+.fog-layer-toggle.active {
+  border-color: #7a001f52;
+  color: #68001a;
+  background: #fff9fa;
+}
+.fog-layer-toggle.active i {
+  opacity: 0.86;
+}
+.fog-layer-time {
+  position: absolute;
+  z-index: 500;
+  top: 3.125rem;
+  right: 0.75rem;
+  padding: 0.25rem 0.4375rem;
+  border-radius: 0.375rem;
+  color: #5f6875;
+  background: #fffffff0;
+  box-shadow: 0 1px 3px #0f17290f;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
 .map-placeholder {
   display: grid;
   place-items: center;
@@ -471,8 +517,10 @@
   bottom: 13px;
   left: 9px;
   display: flex;
-  gap: 14px;
-  height: 30px;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.875rem;
+  max-width: calc(100% - 1.125rem);
+  min-height: 1.875rem;
   align-items: center;
   padding: 6px 9px;
   border-radius: 10px;
@@ -485,6 +533,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  white-space: nowrap;
 }
 .map-legend i {
   width: 10px;
@@ -495,6 +544,10 @@
 }
 .map-legend i.selected {
   border-color: #f97316;
+}
+.map-legend i.fog {
+  border: 0;
+  border-radius: 0.125rem;
 }
 .map-source {
   display: flex;

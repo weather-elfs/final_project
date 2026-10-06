@@ -1,9 +1,9 @@
-import { useCallback, useEffect } from 'react';
-import { CircleMarker, MapContainer, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { useCallback, useEffect, useState } from 'react';
+import { CircleMarker, MapContainer, Pane, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import type { MapViewport } from '../../../api';
-import type { DashboardMapPoint } from '../types';
+import type { DashboardMapPoint, FogMapLayer } from '../types';
 
 const INITIAL_CENTER: [number, number] = [37.47772, 126.6249];
 const INITIAL_ZOOM = 10;
@@ -25,6 +25,7 @@ interface WeatherMapProps {
   points: DashboardMapPoint[];
   selectedId: string;
   focusStation?: Pick<DashboardMapPoint, 'stationId' | 'latitude' | 'longitude'>;
+  fogLayer?: FogMapLayer;
   tilesEnabled?: boolean;
   onSelect: (stationId: string) => void;
   onViewportChange: (viewport: MapViewport) => void;
@@ -59,13 +60,33 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   return null;
 }
 
-export default function WeatherMap({ points, selectedId, focusStation, tilesEnabled = true, onSelect, onViewportChange }: WeatherMapProps) {
+export default function WeatherMap({ points, selectedId, focusStation, fogLayer, tilesEnabled = true, onSelect, onViewportChange }: WeatherMapProps) {
+  const [fogVisible, setFogVisible] = useState(true);
   const selected = points.find((point) => point.stationId === selectedId) ?? focusStation;
+  const fogColors = new Map(fogLayer?.legend.map((item) => [item.value, item.color]));
 
   return (
     <div className="map-frame">
       <MapContainer center={INITIAL_CENTER} zoom={INITIAL_ZOOM} minZoom={6} maxZoom={13} className="map-canvas">
         {tilesEnabled && <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />}
+        {fogVisible && fogLayer && (
+          <Pane name="gk2a-fog-layer" style={{ zIndex: 350 }}>
+            {fogLayer.cells.map((cell) => (
+              <Polygon
+                key={cell.id}
+                positions={cell.positions}
+                interactive={false}
+                pathOptions={{
+                  color: fogColors.get(cell.fogClass) ?? '#7a001f',
+                  fillColor: fogColors.get(cell.fogClass) ?? '#7a001f',
+                  fillOpacity: cell.fogClass === 5 ? 0.5 : 0.34,
+                  opacity: 0.22,
+                  weight: 0.5,
+                }}
+              />
+            ))}
+          </Pane>
+        )}
         <MapFocus station={selected} />
         <ViewportReporter onViewportChange={onViewportChange} />
         {points.map((point) => {
@@ -91,7 +112,36 @@ export default function WeatherMap({ points, selectedId, focusStation, tilesEnab
           );
         })}
       </MapContainer>
-      <div className="map-legend" aria-label="지도 범례"><span><i className="selected" />선택 ASOS</span><span><i />기타 ASOS</span></div>
+      {fogLayer && (
+        <button
+          type="button"
+          className={`fog-layer-toggle${fogVisible ? ' active' : ''}`}
+          aria-pressed={fogVisible}
+          onClick={() => setFogVisible((visible) => !visible)}
+        >
+          <i aria-hidden="true" />
+          GK2A 안개
+        </button>
+      )}
+      <div className="map-legend" aria-label="지도 범례">
+        <span><i className="selected" />선택 ASOS</span>
+        <span><i />기타 ASOS</span>
+        {fogVisible && fogLayer?.legend.map((item) => (
+          <span key={item.value}><i className="fog" style={{ backgroundColor: item.color }} />{item.label}</span>
+        ))}
+      </div>
+      {fogVisible && fogLayer && (
+        <div className="fog-layer-time">
+          {fogLayer.source} · {new Intl.DateTimeFormat('ko-KR', {
+            timeZone: 'Asia/Seoul',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          }).format(new Date(fogLayer.observedAt))} KST
+        </div>
+      )}
     </div>
   );
 }

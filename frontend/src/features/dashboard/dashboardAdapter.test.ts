@@ -32,3 +32,24 @@ test('설정 응답의 좌표로 현재 지도 범위 안 관측소만 반환한
 
   assert.deepEqual(visible.map((station) => station.id), ['112']);
 });
+
+test('GK2A 안개 레이어의 좌표와 품질 정보를 camelCase로 변환한다', () => {
+  const config = toDashboardConfig({
+    stations: [],
+    mission_types: [],
+    forecast_interval_options_h: [],
+    fog_layer: {
+      source: 'GK2A',
+      observed_at: '2025-06-23T13:00:00Z',
+      projection: 'LCC',
+      resolution_km: 2,
+      quality: { field: 'fog_dqf', accepted_values: [0] },
+      legend: [{ value: 5, label: '안개', color: '#7a001f' }],
+      cells: [{ id: '440-381', fog_class: 5, positions: [[37.5, 126.5]] }],
+    },
+  });
+
+  assert.equal(config.fogLayer?.observedAt, '2025-06-23T13:00:00Z');
+  assert.deepEqual(config.fogLayer?.quality.acceptedValues, [0]);
+  assert.equal(config.fogLayer?.cells[0]?.fogClass, 5);
+});
