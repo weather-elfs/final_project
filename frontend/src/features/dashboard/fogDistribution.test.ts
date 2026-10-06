@@ -28,15 +28,24 @@ test('가까운 GK2A 격자를 하나의 안개 분포핵으로 묶는다', () =
   const nearbyCluster = clusters.find((cluster) => cluster.cellCount === 2);
   assert.ok(nearbyCluster);
   assert.ok(Math.abs(nearbyCluster.center[0] - 37.505) < 1e-9);
-  assert.equal(nearbyCluster.maxFogClass, 5);
+  assert.equal(nearbyCluster.maxDisplayStage, 4);
 });
 
-test('군집 안에서 가장 높은 안개 등급을 분포 단계로 유지한다', () => {
+test('GK2A 안개 분류를 피그마의 화면 단계로 변환한다', () => {
   const lower = cell('a', 37.5, 126.1);
   lower.fogClass = 4;
   const clusters = buildFogDistributionClusters([lower, cell('b', 37.51, 126.11)]);
 
-  assert.equal(clusters[0]?.maxFogClass, 5);
+  assert.equal(clusters[0]?.maxDisplayStage, 4);
+});
+
+test('청천·구름·적설 등 안개가 아닌 GK2A 분류는 제외한다', () => {
+  const clear = cell('clear', 37.5, 126.1);
+  clear.fogClass = 1;
+  const snow = cell('snow', 37.51, 126.11);
+  snow.fogClass = 6;
+
+  assert.deepEqual(buildFogDistributionClusters([clear, snow]), []);
 });
 
 test('격자가 많을수록 분포 반경과 강도가 커진다', () => {

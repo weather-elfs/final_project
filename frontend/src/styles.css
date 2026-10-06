@@ -428,11 +428,17 @@
   position: relative;
   margin: 0 16px;
 }
+.map-viewport {
+  position: relative;
+}
 .map-canvas,
 .map-placeholder {
   height: 328px;
   border-radius: 6px;
   background: #dfe9e5;
+}
+.map-frame.with-fog-scale .map-canvas {
+  height: 284px;
 }
 .fog-layer-toggle {
   position: absolute;
@@ -468,7 +474,7 @@
   opacity: 0.86;
 }
 .fog-density-band {
-  filter: blur(0.1rem);
+  filter: blur(0.65rem);
   transition: fill-opacity 180ms ease;
 }
 .fog-layer-time {
@@ -549,9 +555,59 @@
 .map-legend i.selected {
   border-color: #f97316;
 }
-.map-legend i.fog-density {
-  border: 0;
-  border-radius: 0.125rem;
+.fog-stage-scale {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 3px 0;
+  color: #5f6875;
+}
+.fog-stage-scale-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: nowrap;
+}
+.fog-stage-scale-heading strong {
+  color: #21272a;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fog-stage-scale-heading span {
+  font-size: 10px;
+}
+.fog-stage-scale-range {
+  min-width: 0;
+}
+.fog-stage-scale-bar {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px #ffffff99;
+}
+.fog-stage-scale-bar i {
+  min-width: 0;
+}
+.fog-stage-scale-ticks {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-top: 2px;
+  font-size: 9px;
+  line-height: 1;
+}
+.fog-stage-scale-ticks span {
+  display: inline-flex;
+  justify-content: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.fog-stage-scale-ticks b {
+  color: #21272a;
+  font-weight: 600;
 }
 .map-source {
   display: flex;
@@ -1080,6 +1136,12 @@
   .map-canvas,
   .map-placeholder {
     height: 310px;
+  }
+  .map-frame.with-fog-scale .map-canvas {
+    height: 258px;
+  }
+  .fog-stage-scale {
+    height: 52px;
   }
   .map-source {
     gap: 8px;

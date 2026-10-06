@@ -7,7 +7,7 @@ export const gk2aFogLayer = {
   projection: 'LCC',
   resolution_km: 2,
   quality: { field: 'fog_dqf', accepted_values: [0] },
-  legend: [{ value: 4, label: '\uc548\uac1c \uac00\ub2a5', color: '#f59e0b' }, { value: 5, label: '\uc548\uac1c', color: '#7a001f' }],
+  legend: [{ value: 4, label: '\uc548\uac1c \uac00\ub2a5', color: '#ffc905' }, { value: 5, label: '\uc548\uac1c', color: '#f02200' }],
   cells: [
     { id: '440-390', fog_class: 5, positions: [[38.175251, 124.593536], [38.175571, 124.616974], [38.157070, 124.617371], [38.156750, 124.593956]] },
     { id: '441-390', fog_class: 5, positions: [[38.156750, 124.593956], [38.157070, 124.617371], [38.138573, 124.617783], [38.138252, 124.594360]] },
