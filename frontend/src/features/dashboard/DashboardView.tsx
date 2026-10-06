@@ -71,7 +71,7 @@ export default function DashboardView({ config, missionStations, dashboard, mapM
               </div>
             </div>
             {config.stations.length > 0 ? <WeatherMap points={mapPoints} selectedId={selectedStationId} focusStation={selectedStation} fogLayer={mapMode === 'current' ? config.fogLayer : undefined} tilesEnabled={mapTilesEnabled} onSelect={onStationSelect} onViewportChange={onMapViewportChange} /> : <div className="map-placeholder">지도 자료를 불러오는 중입니다.</div>}
-            <div className="map-source"><span>지도 음영은 관측 자료와 예측 모델을 바탕으로 추정한 시정 분포입니다.</span><span>데이터 출처 ASOS · 해양부이 · GK2A · AirKorea · 산림청</span></div>
+            <div className="map-source"><span>지도 음영은 GK2A 탐지 격자를 평활화한 안개 분포 추정입니다.</span><span>데이터 출처 ASOS · 해양부이 · GK2A · AirKorea · 산림청</span></div>
           </section>
 
           <VisibilitySummary dashboard={dashboard} loading={loading} onRefresh={onRefresh} />

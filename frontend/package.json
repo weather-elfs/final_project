@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "tsx --test src/api.test.ts src/features/dashboard/dashboardAdapter.test.ts src/features/dashboard/formatters.test.ts src/features/dashboard/gradeTones.test.ts",
+    "test": "tsx --test src/api.test.ts src/features/dashboard/dashboardAdapter.test.ts src/features/dashboard/fogDistribution.test.ts src/features/dashboard/formatters.test.ts src/features/dashboard/gradeTones.test.ts",
     "typecheck": "tsc --noEmit",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build"

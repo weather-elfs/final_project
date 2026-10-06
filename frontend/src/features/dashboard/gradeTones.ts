@@ -1,10 +1,12 @@
 export type GradeTone = 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'maroon' | 'neutral';
 
 const FOG_TONES: Record<string, GradeTone> = {
-  박무: 'yellow',
-  '안개 가능': 'purple',
-  안개: 'purple',
-  '짙은 안개': 'maroon',
+  '옅은 안개': 'green',
+  '안개 가능': 'yellow',
+  박무: 'orange',
+  안개: 'red',
+  '짙은 안개': 'purple',
+  '매우 짙은 안개': 'maroon',
 };
 
 const FOG_STAGES: Record<string, number> = {

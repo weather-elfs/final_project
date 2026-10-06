@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CircleMarker, MapContainer, Pane, Polygon, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { Circle, CircleMarker, MapContainer, Pane, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import type { MapViewport } from '../../../api';
+import { buildFogDistributionClusters } from '../fogDistribution';
 import type { DashboardMapPoint, FogMapLayer } from '../types';
 
 const INITIAL_CENTER: [number, number] = [37.47772, 126.6249];
 const INITIAL_ZOOM = 10;
 const UNAVAILABLE_STATUSES = new Set(['ERROR', 'FAIL', 'FAILED', 'MISSING', 'UNAVAILABLE']);
+const FOG_DISTRIBUTION_BANDS = [
+  { stage: 1, color: '#9eff91', radiusScale: 1, fillOpacity: 0.12 },
+  { stage: 2, color: '#ffc905', radiusScale: 0.82, fillOpacity: 0.16 },
+  { stage: 3, color: '#ff8205', radiusScale: 0.65, fillOpacity: 0.2 },
+  { stage: 4, color: '#f02200', radiusScale: 0.48, fillOpacity: 0.27 },
+  { stage: 5, color: '#890997', radiusScale: 0.33, fillOpacity: 0.36 },
+  { stage: 6, color: '#640015', radiusScale: 0.22, fillOpacity: 0.44 },
+] as const;
+const FOG_STAGE_LEGEND = [
+  { label: '1–2단계', background: 'linear-gradient(90deg, #9eff91 0 50%, #ffc905 50%)' },
+  { label: '3–4단계', background: 'linear-gradient(90deg, #ff8205 0 50%, #f02200 50%)' },
+  { label: '5–6단계', background: 'linear-gradient(90deg, #890997 0 50%, #640015 50%)' },
+] as const;
 
 const STATUS_LABELS: Record<string, string> = {
   GOOD: '정상',
@@ -63,7 +77,7 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
 export default function WeatherMap({ points, selectedId, focusStation, fogLayer, tilesEnabled = true, onSelect, onViewportChange }: WeatherMapProps) {
   const [fogVisible, setFogVisible] = useState(true);
   const selected = points.find((point) => point.stationId === selectedId) ?? focusStation;
-  const fogColors = new Map(fogLayer?.legend.map((item) => [item.value, item.color]));
+  const fogClusters = buildFogDistributionClusters(fogLayer?.cells ?? []);
 
   return (
     <div className="map-frame">
@@ -71,20 +85,24 @@ export default function WeatherMap({ points, selectedId, focusStation, fogLayer,
         {tilesEnabled && <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />}
         {fogVisible && fogLayer && (
           <Pane name="gk2a-fog-layer" style={{ zIndex: 350 }}>
-            {fogLayer.cells.map((cell) => (
-              <Polygon
-                key={cell.id}
-                positions={cell.positions}
+            {FOG_DISTRIBUTION_BANDS.map((band) => fogClusters
+              .filter((cluster) => band.stage <= cluster.maxFogClass)
+              .map((cluster) => (
+              <Circle
+                key={`${band.stage}-${cluster.id}`}
+                center={cluster.center}
+                radius={cluster.radiusM * band.radiusScale}
                 interactive={false}
                 pathOptions={{
-                  color: fogColors.get(cell.fogClass) ?? '#7a001f',
-                  fillColor: fogColors.get(cell.fogClass) ?? '#7a001f',
-                  fillOpacity: cell.fogClass === 5 ? 0.5 : 0.34,
-                  opacity: 0.22,
-                  weight: 0.5,
+                  className: 'fog-density-band',
+                  color: band.color,
+                  fillColor: band.color,
+                  fillOpacity: band.fillOpacity * cluster.intensity,
+                  opacity: 0,
+                  stroke: false,
                 }}
               />
-            ))}
+            )))}
           </Pane>
         )}
         <MapFocus station={selected} />
@@ -120,14 +138,14 @@ export default function WeatherMap({ points, selectedId, focusStation, fogLayer,
           onClick={() => setFogVisible((visible) => !visible)}
         >
           <i aria-hidden="true" />
-          GK2A 안개
+          GK2A 분포
         </button>
       )}
       <div className="map-legend" aria-label="지도 범례">
         <span><i className="selected" />선택 ASOS</span>
         <span><i />기타 ASOS</span>
-        {fogVisible && fogLayer?.legend.map((item) => (
-          <span key={item.value}><i className="fog" style={{ backgroundColor: item.color }} />{item.label}</span>
+        {fogVisible && fogLayer && FOG_STAGE_LEGEND.map((item) => (
+          <span key={item.label}><i className="fog-density" style={{ background: item.background }} />{item.label}</span>
         ))}
       </div>
       {fogVisible && fogLayer && (

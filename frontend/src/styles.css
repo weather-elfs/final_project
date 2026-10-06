@@ -456,7 +456,7 @@
   width: 0.625rem;
   height: 0.625rem;
   border-radius: 0.125rem;
-  background: #7a001f;
+  background: linear-gradient(135deg, #9eff91 0 17%, #ffc905 17% 34%, #ff8205 34% 51%, #f02200 51% 68%, #890997 68% 85%, #640015 85%);
   opacity: 0.35;
 }
 .fog-layer-toggle.active {
@@ -466,6 +466,10 @@
 }
 .fog-layer-toggle.active i {
   opacity: 0.86;
+}
+.fog-density-band {
+  filter: blur(0.1rem);
+  transition: fill-opacity 180ms ease;
 }
 .fog-layer-time {
   position: absolute;
@@ -545,7 +549,7 @@
 .map-legend i.selected {
   border-color: #f97316;
 }
-.map-legend i.fog {
+.map-legend i.fog-density {
   border: 0;
   border-radius: 0.125rem;
 }
