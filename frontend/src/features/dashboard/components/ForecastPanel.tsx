@@ -1,4 +1,4 @@
-import { fogStageLabel } from '../gradeTones';
+import { fogGradeByVisibility } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
 
@@ -19,7 +19,10 @@ export default function ForecastPanel({ dashboard, requested, loading }: Forecas
 
   const forecastTime = (value?: string) => formatKstTime(value).slice(0, 5);
   const temperature = (value?: number | null) => value == null ? '—' : `${value.toFixed(0)}°C`;
-  const stageAndLabel = (label?: string) => `${fogStageLabel(label)} ${label ?? '판단 대기'}`;
+  const stageAndLabel = (visibilityKm?: number | null) => {
+    const grade = fogGradeByVisibility(visibilityKm);
+    return `${grade.stage ? `${grade.stage}/6단계` : '—/6단계'} ${grade.label}`;
+  };
   const airQuality = (point: (typeof forecast)[number]) => {
     const level = point.aqi?.displayLevel == null ? '—' : point.aqi.displayLevel;
     return `${level}/5단계 ${point.aqi?.displayGrade ?? '판단 대기'}`;
@@ -55,13 +58,16 @@ export default function ForecastPanel({ dashboard, requested, loading }: Forecas
                 <tr><th scope="row">기온</th>{forecast.map((point) => <td key={`temperature-${point.horizonH}-${point.validAt}`}>{temperature(point.temperatureC)}</td>)}</tr>
                 <tr><th scope="row">풍향·풍속</th>{forecast.map((point) => <td className="forecast-cell-lines" key={`wind-${point.horizonH}-${point.validAt}`}><span>{point.windDirectionLabel ?? '자료 없음'}</span><span>{metric(point.windSpeedMS, 'm/s', 1)}</span></td>)}</tr>
                 <tr className="forecast-visibility-row"><th scope="row">시정</th>{forecast.map((point) => <td key={`visibility-${point.horizonH}-${point.validAt}`}>{metric(point.visibilityPredKm, 'km', 1)}</td>)}</tr>
-                <tr><th scope="row">안개 단계</th>{forecast.map((point) => <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}><span>{fogStageLabel(point.fogGradeLabel)}</span><span>{point.fogGradeLabel ?? '판단 대기'}</span></td>)}</tr>
+                <tr><th scope="row">안개 단계</th>{forecast.map((point) => {
+                  const grade = fogGradeByVisibility(point.visibilityPredKm);
+                  return <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}><span>{grade.stage ? `${grade.stage}/6단계` : '—/6단계'}</span><span>{grade.label}</span></td>;
+                })}</tr>
                 <tr><th scope="row">대기질</th>{forecast.map((point) => <td className="forecast-cell-lines" key={`aqi-${point.horizonH}-${point.validAt}`}><span>{airQuality(point).split(' ')[0]}</span><span>{airQuality(point).split(' ').slice(1).join(' ')}</span></td>)}</tr>
               </tbody>
             </table>
           </div>
           {lowestVisibilityPoint && (
-            <p className="forecast-summary">종합 예측: +{lowestVisibilityPoint.horizonH}시간 시정 최저 {metric(lowestVisibilityPoint.visibilityPredKm, 'km', 1)} · {stageAndLabel(lowestVisibilityPoint.fogGradeLabel)}</p>
+            <p className="forecast-summary">종합 예측: +{lowestVisibilityPoint.horizonH}시간 시정 최저 {metric(lowestVisibilityPoint.visibilityPredKm, 'km', 1)} · {stageAndLabel(lowestVisibilityPoint.visibilityPredKm)}</p>
           )}
         </div>
       )}

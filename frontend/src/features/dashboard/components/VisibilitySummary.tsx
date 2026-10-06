@@ -1,4 +1,4 @@
-import { aqiGradeTone, fogGradeTone, fogStageLabel } from '../gradeTones';
+import { aqiGradeTone, fogGradeByVisibility } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
 
@@ -9,11 +9,6 @@ function weatherGlyph(label?: string) {
   return '≡';
 }
 
-function fogImpact(label: string) {
-  if (label === '짙은 안개') return '짙은 안개 · 200–500 m';
-  return label;
-}
-
 export default function VisibilitySummary({ dashboard, loading, onRefresh }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void }) {
   const current = dashboard?.current;
   const diagnosis = dashboard?.diagnosis;
@@ -22,9 +17,9 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
   const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
   const statusLabel = errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
   const statusTone = errors ? 'error' : delayed ? 'delayed' : 'good';
-  const fogLabel = diagnosis?.fogLabel ?? current?.fogGradeLabel ?? '판단 대기';
+  const fogGrade = fogGradeByVisibility(current?.visibilityKm);
   const aqiLabel = current?.aqi?.displayGrade ?? diagnosis?.pmDisplayGrade ?? '판단 대기';
-  const fogDetail = fogImpact(fogLabel);
+  const fogDetail = fogGrade.stage ? `${fogGrade.label} · ${fogGrade.rangeLabel}` : fogGrade.label;
 
   return (
     <section className="panel current-weather-panel" aria-labelledby="current-weather-title">
@@ -48,7 +43,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
 
       <div className="impact-title"><h3>시정 영향 요인 ⓘ</h3></div>
       <div className="impact-grid">
-        <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGradeTone(fogLabel)}`}>{fogStageLabel(fogLabel)}</b></article>
+        <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGrade.tone}`}>{fogGrade.stage ? `${fogGrade.stage}/6단계` : '—/6단계'}</b></article>
         <article><div><strong>대기질</strong><span>AQI {current?.aqi?.value ?? '—'} · {aqiLabel}</span></div><b className={`factor-stage grade-tone-${aqiGradeTone(aqiLabel)}`}>{current?.aqi?.displayLevel ?? '—'}/5단계</b></article>
       </div>
       <p className="diagnosis-summary">종합 추정: {diagnosis?.summary ?? '데이터 대기'}</p>

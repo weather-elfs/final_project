@@ -10,12 +10,12 @@ const INITIAL_CENTER: [number, number] = [37.47772, 126.6249];
 const INITIAL_ZOOM = 10;
 const UNAVAILABLE_STATUSES = new Set(['ERROR', 'FAIL', 'FAILED', 'MISSING', 'UNAVAILABLE']);
 const FOG_DISTRIBUTION_BANDS = [
-  { stage: 1, label: '옅음', color: '#9eff91', radiusScale: 1, fillOpacity: 0.11 },
-  { stage: 2, label: '가능', color: '#ffc905', radiusScale: 0.82, fillOpacity: 0.14 },
-  { stage: 3, label: '박무', color: '#ff8205', radiusScale: 0.65, fillOpacity: 0.18 },
-  { stage: 4, label: '안개', color: '#f02200', radiusScale: 0.48, fillOpacity: 0.23 },
-  { stage: 5, label: '짙음', color: '#890997', radiusScale: 0.33, fillOpacity: 0.32 },
-  { stage: 6, label: '매우 짙음', color: '#640015', radiusScale: 0.22, fillOpacity: 0.4 },
+  { stage: 1, label: '옅은 안개', rangeLabel: '4–10 km', color: '#9eff91', radiusScale: 1, fillOpacity: 0.11 },
+  { stage: 2, label: '옅은 안개', rangeLabel: '2–4 km', color: '#ffc905', radiusScale: 0.82, fillOpacity: 0.14 },
+  { stage: 3, label: '안개', rangeLabel: '1–2 km', color: '#ff8205', radiusScale: 0.65, fillOpacity: 0.18 },
+  { stage: 4, label: '안개', rangeLabel: '500 m–1 km', color: '#f02200', radiusScale: 0.48, fillOpacity: 0.23 },
+  { stage: 5, label: '짙은 안개', rangeLabel: '200–500 m', color: '#890997', radiusScale: 0.33, fillOpacity: 0.32 },
+  { stage: 6, label: '짙은 안개', rangeLabel: '200 m 미만', color: '#640015', radiusScale: 0.22, fillOpacity: 0.4 },
 ] as const;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -155,14 +155,14 @@ export default function WeatherMap({ points, selectedId, focusStation, fogLayer,
         )}
       </div>
       {fogVisible && fogLayer && (
-        <div className="fog-stage-scale" aria-label="안개 단계 범위">
-          <div className="fog-stage-scale-heading"><strong>안개 단계</strong><span>옅음 → 매우 짙음</span></div>
+        <div className="fog-stage-scale" aria-label="안개 위험 단계 범위">
+          <div className="fog-stage-scale-heading"><strong>안개 위험 단계</strong><span>6등급</span></div>
           <div className="fog-stage-scale-range">
             <div className="fog-stage-scale-bar" aria-hidden="true">
               {FOG_DISTRIBUTION_BANDS.map((band) => <i key={band.stage} style={{ backgroundColor: band.color }} />)}
             </div>
             <div className="fog-stage-scale-ticks">
-              {FOG_DISTRIBUTION_BANDS.map((band) => <span key={band.stage}><b>{band.stage}</b>{band.label}</span>)}
+              {FOG_DISTRIBUTION_BANDS.map((band) => <span key={band.stage}><b>{band.stage}/6</b><em>{band.label}</em><small>{band.rangeLabel}</small></span>)}
             </div>
           </div>
         </div>

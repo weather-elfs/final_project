@@ -438,7 +438,7 @@
   background: #dfe9e5;
 }
 .map-frame.with-fog-scale .map-canvas {
-  height: 284px;
+  height: 268px;
 }
 .fog-layer-toggle {
   position: absolute;
@@ -558,7 +558,7 @@
 .fog-stage-scale {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  height: 44px;
+  height: 60px;
   align-items: center;
   gap: 10px;
   padding: 5px 3px 0;
@@ -595,19 +595,33 @@
 .fog-stage-scale-ticks {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: 9px;
-  line-height: 1;
+  line-height: 1.1;
 }
 .fog-stage-scale-ticks span {
-  display: inline-flex;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   white-space: nowrap;
 }
 .fog-stage-scale-ticks b {
   color: #21272a;
   font-weight: 600;
+}
+.fog-stage-scale-ticks em {
+  overflow: hidden;
+  max-width: 100%;
+  color: #4b5563;
+  font-style: normal;
+  text-overflow: ellipsis;
+}
+.fog-stage-scale-ticks small {
+  color: #7b8490;
+  font-size: 8px;
 }
 .map-source {
   display: flex;
@@ -1138,10 +1152,10 @@
     height: 310px;
   }
   .map-frame.with-fog-scale .map-canvas {
-    height: 258px;
+    height: 242px;
   }
   .fog-stage-scale {
-    height: 52px;
+    height: 68px;
   }
   .map-source {
     gap: 8px;

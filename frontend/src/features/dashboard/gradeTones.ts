@@ -1,22 +1,29 @@
 export type GradeTone = 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'maroon' | 'neutral';
 
-const FOG_TONES: Record<string, GradeTone> = {
-  '옅은 안개': 'green',
-  '안개 가능': 'yellow',
-  박무: 'orange',
-  안개: 'red',
-  '짙은 안개': 'purple',
-  '매우 짙은 안개': 'maroon',
+export interface FogGradePresentation {
+  stage: number | null;
+  label: string;
+  rangeLabel: string;
+  tone: GradeTone;
+}
+
+const PENDING_FOG_GRADE: FogGradePresentation = {
+  stage: null,
+  label: '판단 대기',
+  rangeLabel: '자료 없음',
+  tone: 'neutral',
 };
 
-const FOG_STAGES: Record<string, number> = {
-  '옅은 안개': 1,
-  '안개 가능': 2,
-  박무: 3,
-  안개: 4,
-  '짙은 안개': 5,
-  '매우 짙은 안개': 6,
-};
+export function fogGradeByVisibility(visibilityKm?: number | null): FogGradePresentation {
+  if (visibilityKm == null || !Number.isFinite(visibilityKm) || visibilityKm < 0) return PENDING_FOG_GRADE;
+  if (visibilityKm > 10) return { stage: null, label: '안개 없음', rangeLabel: '10 km 초과', tone: 'neutral' };
+  if (visibilityKm >= 4) return { stage: 1, label: '옅은 안개', rangeLabel: '4–10 km', tone: 'green' };
+  if (visibilityKm >= 2) return { stage: 2, label: '옅은 안개', rangeLabel: '2–4 km', tone: 'yellow' };
+  if (visibilityKm >= 1) return { stage: 3, label: '안개', rangeLabel: '1–2 km', tone: 'orange' };
+  if (visibilityKm >= 0.5) return { stage: 4, label: '안개', rangeLabel: '500 m–1 km', tone: 'red' };
+  if (visibilityKm >= 0.2) return { stage: 5, label: '짙은 안개', rangeLabel: '200–500 m', tone: 'purple' };
+  return { stage: 6, label: '짙은 안개', rangeLabel: '200 m 미만', tone: 'maroon' };
+}
 
 const AQI_TONES: Record<string, GradeTone> = {
   좋음: 'green',
@@ -26,12 +33,12 @@ const AQI_TONES: Record<string, GradeTone> = {
   '매우 나쁨': 'maroon',
 };
 
-export function fogGradeTone(label?: string): GradeTone {
-  return label ? FOG_TONES[label] ?? 'neutral' : 'neutral';
+export function fogGradeTone(visibilityKm?: number | null): GradeTone {
+  return fogGradeByVisibility(visibilityKm).tone;
 }
 
-export function fogStageLabel(label?: string): string {
-  const stage = label ? FOG_STAGES[label] : undefined;
+export function fogStageLabel(visibilityKm?: number | null): string {
+  const stage = fogGradeByVisibility(visibilityKm).stage;
   return stage ? `${stage}/6단계` : '—/6단계';
 }
 

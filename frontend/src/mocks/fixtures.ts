@@ -57,11 +57,11 @@ const stationSnapshots: Record<string, StationSnapshot> = {
   },
   '112': {
     station: { station_id: '112', station_name: '인천', latitude: 37.47772, longitude: 126.6249 },
-    current: { visibility_km: 4.8, pm1_ug_m3: 12, pm25_ug_m3: 27, pm10_ug_m3: 44, temperature_c: 18, wind_direction_deg: 315, wind_direction_label: '북서풍', wind_speed_m_s: 4.2, relative_humidity_pct: 81, temperature_dewpoint_spread_c: 2.8, weather_label: '안개', fog_grade_label: '짙은 안개' },
+    current: { visibility_km: 4.8, pm1_ug_m3: 12, pm25_ug_m3: 27, pm10_ug_m3: 44, temperature_c: 18, wind_direction_deg: 315, wind_direction_label: '북서풍', wind_speed_m_s: 4.2, relative_humidity_pct: 81, temperature_dewpoint_spread_c: 2.8, weather_label: '안개', fog_grade_label: '옅은 안개' },
   },
   '201': {
     station: { station_id: '201', station_name: '강화', latitude: 37.70739, longitude: 126.44634 },
-    current: { visibility_km: 3.6, pm1_ug_m3: 17, pm25_ug_m3: 34, pm10_ug_m3: 53, temperature_c: 16, wind_direction_deg: 260, wind_direction_label: '서풍', wind_speed_m_s: 2.8, relative_humidity_pct: 88, temperature_dewpoint_spread_c: 1.6, weather_label: '박무', fog_grade_label: '안개' },
+    current: { visibility_km: 3.6, pm1_ug_m3: 17, pm25_ug_m3: 34, pm10_ug_m3: 53, temperature_c: 16, wind_direction_deg: 260, wind_direction_label: '서풍', wind_speed_m_s: 2.8, relative_humidity_pct: 88, temperature_dewpoint_spread_c: 1.6, weather_label: '박무', fog_grade_label: '옅은 안개' },
   },
 };
 
@@ -83,7 +83,7 @@ function forecastPoint(snapshot: StationSnapshot, horizonH: number, slot: number
     wind_direction_label: snapshot.current.wind_direction_label,
     wind_speed_m_s: Number((snapshot.current.wind_speed_m_s + slot * 0.2).toFixed(1)),
     weather_label: slot > 2 ? '흐림' : snapshot.current.weather_label,
-    fog_grade_label: visibility < 1 ? '안개' : visibility < 4 ? '안개 가능' : '옅은 안개',
+    fog_grade_label: visibility < 0.5 ? '짙은 안개' : visibility < 2 ? '안개' : visibility <= 10 ? '옅은 안개' : '안개 없음',
     aqi: { value: 84 + slot * 8, display_level: slot > 2 ? 2 : 1, display_grade: slot > 2 ? '민감군 주의' : '양호', status: 'calculated' },
     status: 'fresh',
   };
