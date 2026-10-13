@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+import uuid
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
 
@@ -289,13 +291,66 @@ def get_source_detail(observed_at, reference_time, max_age_hours=2):
     }
 
 
+def to_contract_source_status(detail):
+    status_mapping = {
+        "OK": "fresh",
+        "STALE": "delayed",
+        "MISSING": "missing",
+    }
+
+    return {
+        **detail,
+        "status": status_mapping.get(detail["status"], "missing"),
+    }
+
+
 @app.get("/api/v1/stations/{station_id}/dashboard")
 def station_dashboard(
     station_id: str,
+    forecast_interval_h: int = Query(default=3),
+    mission_type: str = Query(default="MARITIME_TRANSPORT"),
     as_of: datetime | None = None,
 ):
     if station_id not in ("102", "112", "201"):
-        raise HTTPException(status_code=404, detail="지원하지 않는 관측소입니다.")
+        return JSONResponse(
+            status_code=404,
+            content={
+                "code": "STATION_NOT_FOUND",
+                "message": "지원하지 않는 관측소입니다.",
+                "data": {
+                    "station_id": station_id,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
+
+    # 예측 간격 검증
+    if forecast_interval_h not in (1, 3, 6, 12):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "INVALID_PARAMETER",
+                "message": "예측 간격은 1, 3, 6, 12시간 중 선택해야 합니다.",
+                "data": {
+                    "forecast_interval_h": forecast_interval_h,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
+
+    # 임무유형 검증
+    if mission_type not in ("MARITIME_TRANSPORT",):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "INVALID_PARAMETER",
+                "message": "지원하지 않는 임무유형입니다.",
+                "data": {
+                    "mission_type": mission_type,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
 
     sql = """
         SELECT
@@ -377,33 +432,63 @@ def station_dashboard(
                 "station_id": row["stn_id"],
                 "station_name": row["stn_ko"],
             },
+            "request_context": {
+                "forecast_interval_h": forecast_interval_h,
+                "forecast_horizons_h": [forecast_interval_h * i for i in range(1, 5)],
+                "mission_type": mission_type,
+            },
             "current": {
                 "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
                 "temperature_c": json_number(row["temp"]),
                 "relative_humidity_pct": json_number(row["humidity"]),
                 "wind_speed_m_s": json_number(row["wind_speed"]),
                 "visibility_km": visibility_km,
-                "status": asos_status.lower(),
+                "status": to_contract_source_status(
+                    get_source_detail(row["tm"], reference_time)
+                )["status"],
                 "pm10_ug_m3": airkorea["pm10_ug_m3"] if airkorea else None,
                 "pm25_ug_m3": airkorea["pm25_ug_m3"] if airkorea else None,
             },
             "marine": marine,
-            "source_status": {
-                "asos": get_source_detail(row["tm"], reference_time),
-                "airkorea": get_source_detail(airkorea_time, reference_time),
-                "marine": get_source_detail(marine_time, reference_time),
-            },
+            "source_status": [
+                {
+                    "source": "ASOS",
+                    **to_contract_source_status(
+                        get_source_detail(row["tm"], reference_time)
+                    ),
+                },
+                {
+                    "source": "AIRKOREA",
+                    **to_contract_source_status(
+                        get_source_detail(airkorea_time, reference_time)
+                    ),
+                },
+                {
+                    "source": "TIDE_OBSERVATORY",
+                    **to_contract_source_status(
+                        get_source_detail(marine_time, reference_time)
+                    ),
+                },
+            ],
             "forecast_timeline": [],
             "mission_evaluation": {
+                "mission_type": mission_type,
+                "rule_version": "maritime-transport-v1",
                 "evaluation_status": "NOT_EVALUABLE",
                 "passed": None,
                 "mission_grade": "UNKNOWN",
                 "factors": [],
                 "reason_codes": ["FORECAST_NOT_READY"],
             },
+            "diagnosis": {
+                "fog_label": None,
+                "pm_display_grade": None,
+                "summary": "예측 모델 준비 중으로 종합 진단을 제공할 수 없습니다.",
+            },
             "meta": {
-                "partial": True,
+                "request_id": f"req_{uuid.uuid4().hex}",
                 "generated_at": datetime.now(KST).isoformat(),
+                "partial": True,
             },
         },
     }
