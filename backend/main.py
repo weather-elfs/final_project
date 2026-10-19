@@ -590,56 +590,40 @@ def station_dashboard(
     # 시정거리 변환
     visibility_km = row["visibility"] / 100 if row["visibility"] is not None else None
     # 프론트엔드 연동 테스트용 Mock 데이터
-    is_mock = (
-        mock
-        and station_id == "112"
-        and forecast_interval_h == 3
-        and mission_type == "MARITIME_TRANSPORT"
-    )
+    is_mock = mock and station_id == "112" and mission_type == "MARITIME_TRANSPORT"
     mock_base_time = (
         reference_time.replace(tzinfo=KST)
         if reference_time.tzinfo is None
         else reference_time.astimezone(KST)
     )
 
-    mock_forecast_timeline = [
-        {
-            "horizon_h": 3,
-            "valid_at": (mock_base_time + timedelta(hours=3)).isoformat(),
-            "visibility_pred_km": 8.5,
-            "visibility_grade": "MODERATE",
-            "fog_grade_label": get_fog_grade_label(8.5),
-            "pm25_pred_ug_m3": None,
-            "pm10_pred_ug_m3": None,
-        },
-        {
-            "horizon_h": 6,
-            "valid_at": (mock_base_time + timedelta(hours=6)).isoformat(),
-            "visibility_pred_km": 3.2,
-            "visibility_grade": "BAD",
-            "fog_grade_label": get_fog_grade_label(3.2),
-            "pm25_pred_ug_m3": None,
-            "pm10_pred_ug_m3": None,
-        },
-        {
-            "horizon_h": 9,
-            "valid_at": (mock_base_time + timedelta(hours=9)).isoformat(),
-            "visibility_pred_km": 0.8,
-            "visibility_grade": "VERY_BAD",
-            "fog_grade_label": get_fog_grade_label(0.8),
-            "pm25_pred_ug_m3": None,
-            "pm10_pred_ug_m3": None,
-        },
-        {
-            "horizon_h": 12,
-            "valid_at": (mock_base_time + timedelta(hours=12)).isoformat(),
-            "visibility_pred_km": 6.4,
-            "visibility_grade": "MODERATE",
-            "fog_grade_label": get_fog_grade_label(6.4),
-            "pm25_pred_ug_m3": None,
-            "pm10_pred_ug_m3": None,
-        },
-    ]
+    mock_visibility_values = [8.5, 3.2, 0.8, 6.4]
+
+    mock_forecast_timeline = []
+
+    for index, visibility in enumerate(mock_visibility_values, start=1):
+        horizon = forecast_interval_h * index
+
+        if visibility >= 10:
+            visibility_grade = "GOOD"
+        elif visibility >= 4:
+            visibility_grade = "MODERATE"
+        elif visibility >= 1:
+            visibility_grade = "BAD"
+        else:
+            visibility_grade = "VERY_BAD"
+
+        mock_forecast_timeline.append(
+            {
+                "horizon_h": horizon,
+                "valid_at": (mock_base_time + timedelta(hours=horizon)).isoformat(),
+                "visibility_pred_km": visibility,
+                "visibility_grade": visibility_grade,
+                "fog_grade_label": get_fog_grade_label(visibility),
+                "pm25_pred_ug_m3": None,
+                "pm10_pred_ug_m3": None,
+            }
+        )
 
     # CatBoost 시간대별 예측 (4개 시점)
     real_forecast_timeline = []
