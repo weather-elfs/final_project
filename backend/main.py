@@ -447,6 +447,102 @@ def get_diagnosis_summary(
     "/api/v1/stations/{station_id}/dashboard",
     summary="선택 관측소 대시보드 조회",
     description="관측 데이터, 예측 시정거리, 임무 판정 결과를 조회합니다.",
+    responses={
+        200: {
+            "description": "대시보드 조회 성공 또는 일부 기능 준비 중",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "PARTIAL_SUCCESS",
+                        "message": "관측 데이터 조회 및 예측 결과 반환",
+                        "data": {
+                            "station": {
+                                "station_id": "112",
+                                "station_name": "인천",
+                            },
+                            "request_context": {
+                                "forecast_interval_h": 3,
+                                "forecast_horizons_h": [3, 6, 9, 12],
+                                "mission_type": "MARITIME_TRANSPORT",
+                            },
+                            "current": {},
+                            "marine": None,
+                            "source_status": [],
+                            "forecast_timeline": [],
+                            "forecast_summary": None,
+                            "mission_evaluation": {},
+                            "diagnosis": {},
+                            "meta": {
+                                "request_id": "req_example",
+                                "partial": True,
+                                "mock": False,
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        404: {
+            "description": (
+                "지원하지 않는 관측소이거나 " "해당 시점의 관측 데이터가 없는 경우"
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "station_not_found": {
+                            "summary": "지원하지 않는 관측소",
+                            "value": {
+                                "code": "STATION_NOT_FOUND",
+                                "message": "지원하지 않는 관측소입니다.",
+                                "data": {
+                                    "station_id": "99999",
+                                    "meta": {"request_id": "req_example"},
+                                },
+                            },
+                        },
+                        "observation_not_found": {
+                            "summary": "관측 데이터 없음",
+                            "value": {
+                                "code": "OBSERVATION_NOT_FOUND",
+                                "message": "관측 데이터가 없습니다.",
+                                "data": {
+                                    "station_id": "112",
+                                    "meta": {"request_id": "req_example"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "요청 파라미터가 유효하지 않은 경우",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "INVALID_PARAMETER",
+                        "message": "예측 간격은 1, 3, 6, 12시간 중 선택해야 합니다.",
+                        "data": {
+                            "forecast_interval_h": 2,
+                            "meta": {"request_id": "req_example"},
+                        },
+                    }
+                }
+            },
+        },
+        503: {
+            "description": "DB 데이터 조회 실패",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "DB_ERROR",
+                        "message": "DB 데이터 조회에 실패했습니다.",
+                        "data": {"meta": {"request_id": "req_example"}},
+                    }
+                }
+            },
+        },
+    },
 )
 def station_dashboard(
     station_id: str,
@@ -554,10 +650,27 @@ def station_dashboard(
             )
     except Exception as e:
         print("DB 조회 오류:", repr(e))
-        raise HTTPException(status_code=503, detail="DB 데이터 조회에 실패했습니다.")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": "DB_ERROR",
+                "message": "DB 데이터 조회에 실패했습니다.",
+                "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
+            },
+        )
 
     if row is None:
-        raise HTTPException(status_code=404, detail="관측 데이터가 없습니다.")
+        return JSONResponse(
+            status_code=404,
+            content={
+                "code": "OBSERVATION_NOT_FOUND",
+                "message": "관측 데이터가 없습니다.",
+                "data": {
+                    "station_id": station_id,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
 
     # 상태 판정 기준 시각
     reference_time = (
