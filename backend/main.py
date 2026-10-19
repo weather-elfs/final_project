@@ -3,8 +3,26 @@ import uuid
 from fastapi.responses import JSONResponse
 from datetime import timedelta
 from backend.model_predict import predict_visibility_pm
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
+
+
+# 프런트엔드 개발 서버의 API 접근 허용
+FRONTEND_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
