@@ -1,0 +1,57 @@
+{
+  "hyperparameters": {
+    "loss_function": "MultiRMSE",
+    "eval_metric": "MultiRMSE",
+    "iterations": 2000,
+    "learning_rate": 0.05,
+    "depth": 6,
+    "l2_leaf_reg": 3,
+    "early_stopping_rounds": 100,
+    "use_best_model": true
+  },
+  "model_features": [
+    "stn_id",
+    "h",
+    "target_hour_sin",
+    "target_hour_cos",
+    "temperature",
+    "humidity",
+    "dewpoint",
+    "dewpoint_depression",
+    "wind_speed",
+    "wind_dir_sin",
+    "wind_dir_cos",
+    "pressure",
+    "precipitation",
+    "cloud_cover",
+    "so2",
+    "no2",
+    "o3",
+    "co",
+    "hour_sin",
+    "hour_cos",
+    "dayofyear_sin",
+    "dayofyear_cos",
+    "sea_temp",
+    "buoy_air_temp",
+    "sea_air_temp_diff",
+    "land_sea_temp_diff",
+    "land_water_temp_diff",
+    "buoy_wind_speed",
+    "buoy_wind_dir_sin",
+    "buoy_pressure",
+    "buoy_wind_dir_cos",
+    "salinity",
+    "temp_salinity_index"
+  ],
+  "target_columns": [
+    "visibility_km",
+    "pm25",
+    "pm10"
+  ],
+  "cat_features": [
+    "stn_id"
+  ],
+  "best_iteration": 82,
+  "best_score": 28.636450376860527
+}
