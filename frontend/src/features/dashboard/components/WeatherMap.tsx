@@ -1,11 +1,12 @@
 import 'leaflet/dist/leaflet.css';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Circle,
   CircleMarker,
   MapContainer,
   Pane,
+  Polygon,
+  Rectangle,
   TileLayer,
   Tooltip,
   useMap,
@@ -14,17 +15,25 @@ import {
 import type { DashboardMapPoint, FogMapLayer } from '../types';
 
 import type { MapViewport } from '../../../api';
-import { buildFogDistributionClusters } from '../fogDistribution';
+import {
+  buildFogCoverageBounds,
+  type FogCoverageBounds,
+} from '../fogDistribution';
+import { interpolateFogMapLayer } from '../forecastFog';
+import FogSurfaceLayer from './FogSurfaceLayer';
 
 const INITIAL_CENTER: [number, number] = [37.47772, 126.6249];
+const FOG_FRAME_TRANSITION_MS = 850;
 const INITIAL_ZOOM = 10;
 const UNAVAILABLE_STATUSES = new Set([
   'ERROR',
   'FAIL',
   'FAILED',
   'MISSING',
+  'NOT_AVAILABLE',
   'UNAVAILABLE',
 ]);
+const DELAYED_STATUSES = new Set(['DELAYED', 'STALE']);
 const FOG_DISTRIBUTION_BANDS = [
   {
     stage: 1,
@@ -77,13 +86,16 @@ const FOG_DISTRIBUTION_BANDS = [
 ] as const;
 
 const STATUS_LABELS: Record<string, string> = {
+  SUCCESS: '정상',
   GOOD: '정상',
   RETRY_SUCCESS: '재시도 후 정상',
-  DELAYED: '지연',
+  DELAYED: '최신 자료 지연',
+  STALE: '최신 자료 지연',
   ERROR: '오류',
   FAIL: '실패',
   FAILED: '실패',
   MISSING: '자료 없음',
+  NOT_AVAILABLE: '예측 미제공',
   UNAVAILABLE: '사용 불가',
   UNKNOWN: '상태 확인 필요',
 };
@@ -96,24 +108,66 @@ interface WeatherMapProps {
     'stationId' | 'latitude' | 'longitude'
   >;
   fogLayer?: FogMapLayer;
+  forecastPlayback?: {
+    frames: Array<{ horizonH: number; validAt?: string }>;
+    activeIndex: number;
+    coverageBounds?: FogCoverageBounds;
+    playing: boolean;
+    onToggle: () => void;
+    onSelect: (index: number) => void;
+  };
   tilesEnabled?: boolean;
   onSelect: (stationId: string) => void;
   onViewportChange: (viewport: MapViewport) => void;
 }
 
+function formatForecastFrameTime(validAt?: string) {
+  if (!validAt || !Number.isFinite(Date.parse(validAt))) return '--:--';
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(validAt));
+}
+
 function MapFocus({
   station,
+  coverageBounds,
 }: {
   station?: Pick<DashboardMapPoint, 'stationId' | 'latitude' | 'longitude'>;
+  coverageBounds?: FogCoverageBounds;
 }) {
   const map = useMap();
+  const south = coverageBounds?.[0][0];
+  const west = coverageBounds?.[0][1];
+  const north = coverageBounds?.[1][0];
+  const east = coverageBounds?.[1][1];
 
   useEffect(() => {
-    if (station)
+    if (south != null && west != null && north != null && east != null) {
+      map.fitBounds([[south, west], [north, east]], {
+        padding: [12, 12],
+        maxZoom: INITIAL_ZOOM,
+        animate: true,
+        duration: 0.5,
+      });
+    } else if (station) {
       map.flyTo([station.latitude, station.longitude], INITIAL_ZOOM, {
         duration: 0.5,
       });
-  }, [map, station?.latitude, station?.longitude, station?.stationId]);
+    }
+  }, [
+    map,
+    south,
+    west,
+    north,
+    east,
+    station?.latitude,
+    station?.longitude,
+    station?.stationId,
+  ]);
 
   return null;
 }
@@ -124,21 +178,100 @@ function ViewportReporter({
   onViewportChange: (viewport: MapViewport) => void;
 }) {
   const map = useMap();
-  const reportViewport = useCallback(() => {
-    const bounds = map.getBounds();
-    onViewportChange({
-      west: bounds.getWest(),
-      south: bounds.getSouth(),
-      east: bounds.getEast(),
-      north: bounds.getNorth(),
-      zoom: map.getZoom(),
-    });
+  const reportTimerRef = useRef<number | undefined>(undefined);
+  const lastViewportKeyRef = useRef('');
+  const scheduleViewportReport = useCallback(() => {
+    window.clearTimeout(reportTimerRef.current);
+    reportTimerRef.current = window.setTimeout(() => {
+      const bounds = map.getBounds();
+      const viewport = {
+        west: Number(bounds.getWest().toFixed(5)),
+        south: Number(bounds.getSouth().toFixed(5)),
+        east: Number(bounds.getEast().toFixed(5)),
+        north: Number(bounds.getNorth().toFixed(5)),
+        zoom: map.getZoom(),
+      };
+      const viewportKey = `${viewport.west}:${viewport.south}:${viewport.east}:${viewport.north}:${viewport.zoom}`;
+      if (viewportKey === lastViewportKeyRef.current) return;
+      lastViewportKeyRef.current = viewportKey;
+      onViewportChange(viewport);
+    }, 250);
   }, [map, onViewportChange]);
 
-  useMapEvents({ moveend: reportViewport });
-  useEffect(reportViewport, [reportViewport]);
+  useMapEvents({ moveend: scheduleViewportReport });
+  useEffect(() => () => window.clearTimeout(reportTimerRef.current), []);
 
   return null;
+}
+
+function useSmoothFogLayer(
+  targetLayer: FogMapLayer | undefined,
+  enabled: boolean,
+  frameIndex?: number,
+) {
+  const [displayedLayer, setDisplayedLayer] = useState(targetLayer);
+  const displayedLayerRef = useRef(targetLayer);
+  const animationFrameRef = useRef<number | null>(null);
+  const previousFrameIndexRef = useRef(frameIndex);
+
+  useEffect(() => {
+    if (animationFrameRef.current != null) {
+      window.cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    const fromLayer = displayedLayerRef.current;
+    const previousFrameIndex = previousFrameIndexRef.current;
+    previousFrameIndexRef.current = frameIndex;
+    const restarting =
+      frameIndex != null &&
+      previousFrameIndex != null &&
+      frameIndex < previousFrameIndex;
+    const prefersReducedMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches;
+
+    if (
+      !enabled ||
+      restarting ||
+      prefersReducedMotion ||
+      !fromLayer ||
+      !targetLayer
+    ) {
+      displayedLayerRef.current = targetLayer;
+      setDisplayedLayer(targetLayer);
+      return;
+    }
+
+    const startedAt = window.performance.now();
+    const animate = (now: number) => {
+      const progress = Math.min(
+        1,
+        (now - startedAt) / FOG_FRAME_TRANSITION_MS,
+      );
+      const nextLayer = interpolateFogMapLayer(
+        fromLayer,
+        targetLayer,
+        progress,
+      );
+
+      displayedLayerRef.current = nextLayer;
+      setDisplayedLayer(nextLayer);
+
+      if (progress < 1) {
+        animationFrameRef.current = window.requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrameRef.current = window.requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameRef.current != null) {
+        window.cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [enabled, frameIndex, targetLayer]);
+
+  return displayedLayer;
 }
 
 export default function WeatherMap({
@@ -146,14 +279,25 @@ export default function WeatherMap({
   selectedId,
   focusStation,
   fogLayer,
+  forecastPlayback,
   tilesEnabled = true,
   onSelect,
   onViewportChange,
 }: WeatherMapProps) {
   const [fogVisible, setFogVisible] = useState(true);
+  const displayedFogLayer = useSmoothFogLayer(
+    fogLayer,
+    Boolean(forecastPlayback),
+    forecastPlayback?.activeIndex,
+  );
   const selected =
     points.find((point) => point.stationId === selectedId) ?? focusStation;
-  const fogClusters = buildFogDistributionClusters(fogLayer?.cells ?? []);
+  const fogCoverageBounds = useMemo(
+    () =>
+      forecastPlayback?.coverageBounds ??
+      buildFogCoverageBounds(displayedFogLayer?.cells ?? []),
+    [displayedFogLayer?.cells, forecastPlayback?.coverageBounds],
+  );
 
   return (
     <div
@@ -173,51 +317,84 @@ export default function WeatherMap({
               url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
             />
           )}
-          {fogVisible && fogLayer && (
-            <Pane name='gk2a-fog-layer' style={{ zIndex: 350 }}>
-              {FOG_DISTRIBUTION_BANDS.map((band) =>
-                fogClusters
-                  .filter((cluster) => band.stage <= cluster.maxDisplayStage)
-                  .map((cluster) => (
-                    <Circle
-                      key={`${band.stage}-${cluster.id}`}
-                      center={cluster.center}
-                      radius={cluster.radiusM * band.radiusScale}
-                      interactive={false}
-                      pathOptions={{
-                        className: 'fog-density-band',
-                        color: band.color,
-                        fillColor: band.color,
-                        fillOpacity: band.fillOpacity * cluster.intensity,
-                        opacity: 0,
-                        stroke: false,
-                      }}
-                    />
-                  )),
+          {fogVisible && displayedFogLayer && (
+            <>
+              {forecastPlayback && fogCoverageBounds && (
+                <Pane name='forecast-coverage-mask' style={{ zIndex: 348 }}>
+                  <Polygon
+                    positions={[
+                      [[85, -180], [85, 180], [-85, 180], [-85, -180]],
+                      [
+                        fogCoverageBounds[0],
+                        [fogCoverageBounds[1][0], fogCoverageBounds[0][1]],
+                        fogCoverageBounds[1],
+                        [fogCoverageBounds[0][0], fogCoverageBounds[1][1]],
+                      ],
+                    ]}
+                    interactive={false}
+                    pathOptions={{
+                      fillColor: '#26394a',
+                      fillOpacity: 0.16,
+                      fillRule: 'evenodd',
+                      stroke: false,
+                    }}
+                  />
+                </Pane>
               )}
-            </Pane>
+              {fogCoverageBounds && (
+                <Pane name='gk2a-fog-base' style={{ zIndex: 349 }}>
+                  <Rectangle
+                    bounds={fogCoverageBounds}
+                    interactive={false}
+                    pathOptions={{
+                      color: 'transparent',
+                      fillColor: '#74d7f7',
+                      fillOpacity: 0.16,
+                      opacity: 0,
+                      stroke: false,
+                    }}
+                  />
+                </Pane>
+              )}
+              <FogSurfaceLayer cells={displayedFogLayer.cells} />
+              {forecastPlayback && fogCoverageBounds && (
+                <Pane name='forecast-coverage-border' style={{ zIndex: 351 }}>
+                  <Rectangle
+                    bounds={fogCoverageBounds}
+                    interactive={false}
+                    pathOptions={{
+                      color: '#487e9c',
+                      opacity: 0.85,
+                      weight: 1.5,
+                      fill: false,
+                    }}
+                  />
+                </Pane>
+              )}
+            </>
           )}
-          <MapFocus station={selected} />
+          <MapFocus
+            station={selected}
+            coverageBounds={forecastPlayback?.coverageBounds}
+          />
           <ViewportReporter onViewportChange={onViewportChange} />
           {points.map((point) => {
             const active = point.stationId === selectedId;
             const status = point.status.toUpperCase();
             const unavailable = UNAVAILABLE_STATUSES.has(status);
+            const delayed = DELAYED_STATUSES.has(status);
+            const statusLabel = STATUS_LABELS[status] ?? point.status;
             const detail =
               point.visibilityKm == null
-                ? `ASOS · ${STATUS_LABELS[status] ?? point.status}`
-                : `ASOS · 시정 ${point.visibilityKm.toFixed(1)} km`;
+                ? `ASOS · ${statusLabel}`
+                : `ASOS · 시정 ${point.visibilityKm.toFixed(1)} km${delayed || unavailable ? ` · ${statusLabel}` : ''}`;
             return (
               <CircleMarker
                 key={point.stationId}
                 center={[point.latitude, point.longitude]}
                 radius={active ? 9 : 6}
                 pathOptions={{
-                  color: unavailable
-                    ? '#9ca3af'
-                    : active
-                      ? '#f97316'
-                      : '#2563eb',
+                  color: active ? '#f97316' : '#2563eb',
                   fillColor: '#ffffff',
                   fillOpacity: 1,
                   weight: active ? 4 : 3,
@@ -225,10 +402,11 @@ export default function WeatherMap({
                 eventHandlers={{ click: () => onSelect(point.stationId) }}
               >
                 <Tooltip
+                  key={`${point.stationId}-${active ? 'selected' : 'hover'}`}
                   direction='top'
                   offset={[0, -8]}
                   opacity={1}
-                  {...(active ? { permanent: true } : {})}
+                  permanent={active}
                   className='station-tooltip'
                 >
                   <strong>
@@ -266,6 +444,44 @@ export default function WeatherMap({
             기타 ASOS
           </span>
         </div>
+        {forecastPlayback && (
+          <div
+            className='forecast-playback'
+            aria-label='예측 레이어 시간 재생'
+          >
+            <button
+              type='button'
+              className='forecast-playback-toggle'
+              aria-label={forecastPlayback.playing ? '예측 일시정지' : '예측 재생'}
+              title={forecastPlayback.playing ? '일시정지' : '재생'}
+              onClick={forecastPlayback.onToggle}
+            >
+              <span aria-hidden='true'>
+                {forecastPlayback.playing ? 'Ⅱ' : '▶'}
+              </span>
+            </button>
+            <div className='forecast-playback-steps' role='group' aria-label='예측 시점'>
+              {forecastPlayback.frames.map((frame, index) => (
+                <button
+                  type='button'
+                  key={`${frame.horizonH}-${frame.validAt ?? index}`}
+                  className={[
+                    forecastPlayback.activeIndex === index ? 'active' : '',
+                    forecastPlayback.activeIndex > index ? 'complete' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-pressed={forecastPlayback.activeIndex === index}
+                  aria-label={`+${frame.horizonH}시간 ${formatForecastFrameTime(frame.validAt)} KST`}
+                  onClick={() => forecastPlayback.onSelect(index)}
+                >
+                  <strong>+{frame.horizonH}h</strong>
+                  <span>{formatForecastFrameTime(frame.validAt)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {fogVisible && fogLayer && (
           <div className='fog-layer-time'>
             {fogLayer.source} ·{' '}
