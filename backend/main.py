@@ -109,23 +109,31 @@ def get_station_current_status(conn, station_id):
 
 @app.get("/api/v1/dashboard/config")
 def dashboard_config(
-    south: float = Query(...),
-    west: float = Query(...),
-    north: float = Query(...),
-    east: float = Query(...),
+    south: float | None = Query(None),
+    west: float | None = Query(None),
+    north: float | None = Query(None),
+    east: float | None = Query(None),
 ):
-    if south > north or west > east:
-        raise HTTPException(
-            status_code=422, detail="지도 경계 좌표가 올바르지 않습니다."
-        )
+    bounds = (south, west, north, east)
 
-    # 지도 범위 안에 있는 관측소만 선택
-    selected_stations = [
-        station
-        for station in STATIONS
-        if south <= station["latitude"] <= north
-        and west <= station["longitude"] <= east
-    ]
+    if all(value is None for value in bounds):
+        selected_stations = STATIONS
+    elif any(value is None for value in bounds):
+        raise HTTPException(
+            status_code=422, detail="지도 경계 좌표 4개를 모두 입력해야 합니다."
+        )
+    else:
+        if south > north or west > east:
+            raise HTTPException(
+                status_code=422, detail="지도 경계 좌표가 올바르지 않습니다."
+            )
+
+        selected_stations = [
+            station
+            for station in STATIONS
+            if south <= station["latitude"] <= north
+            and west <= station["longitude"] <= east
+        ]
 
     stations = []
 
@@ -152,7 +160,7 @@ def dashboard_config(
         "message": "대시보드 설정을 조회했습니다.",
         "data": {
             "stations": stations,
-            "forecast_intervals_h": [1, 3, 6, 12],
+            "forecast_interval_options_h": [1, 3, 6, 12],
             "forecast_slots": 4,
             "mission_types": [
                 {
