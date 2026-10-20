@@ -1,0 +1,63 @@
+.weather-ui .alert-layout {
+  grid-template-columns: minmax(0, 2fr) minmax(22rem, 1fr);
+}
+
+.weather-ui .alert-rules-card,
+.weather-ui .decision-log-card {
+  min-height: 38.375rem;
+}
+
+.weather-ui .alert-rules-table {
+  min-width: 43.75rem;
+}
+
+.weather-ui .alert-rules-table th:nth-child(-n + 3) {
+  width: 21%;
+}
+
+.weather-ui .alert-rules-table th:nth-child(n + 4) {
+  width: 18.5%;
+}
+
+.weather-ui .rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.weather-ui .decision-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.weather-ui .decision-list article {
+  display: flex;
+  min-height: 7rem;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.5rem;
+  background: var(--background);
+}
+
+.weather-ui .decision-list article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.weather-ui .decision-list time {
+  font-weight: 600;
+}
+
+.weather-ui .decision-list article > strong {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.weather-ui .decision-list p {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
