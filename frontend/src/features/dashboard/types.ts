@@ -1,5 +1,8 @@
 import type { MapViewport } from '../../api';
 
+export type StationCurrentStatus = 'GOOD' | 'DELAYED' | 'MISSING' | 'UNAVAILABLE' | 'UNKNOWN';
+export type StationForecastStatus = 'GOOD' | 'DELAYED' | 'NOT_AVAILABLE' | 'UNKNOWN';
+
 export interface DashboardStation {
   id: string;
   name: string;
@@ -8,8 +11,8 @@ export interface DashboardStation {
   latitude: number;
   longitude: number;
   available: boolean;
-  currentStatus?: string;
-  forecastStatus?: string;
+  currentStatus: StationCurrentStatus;
+  forecastStatus: StationForecastStatus;
 }
 
 export interface MissionType {
@@ -85,6 +88,9 @@ export interface ForecastPoint {
   horizonH?: number;
   status?: string;
   visibilityPredKm?: number | null;
+  visibilityGrade?: string;
+  pm25PredUgM3?: number | null;
+  pm10PredUgM3?: number | null;
   temperatureC?: number | null;
   windDirectionLabel?: string;
   windSpeedMS?: number | null;
@@ -94,32 +100,74 @@ export interface ForecastPoint {
 }
 
 export interface MissionFactor {
-  actual: number;
+  metric?: string;
+  actual: number | null;
   unit: string;
   operator: string;
   threshold: number;
-  passed?: boolean;
+  required?: boolean;
+  passed?: boolean | null;
+}
+
+export interface RequestContext {
+  forecastIntervalH?: number;
+  forecastHorizonsH?: number[];
+  missionType?: string;
+}
+
+export interface ForecastSummary extends ForecastPoint {
+  selectionReason?: string;
+}
+
+export interface SourceStatusDetail {
+  source: string;
+  status: string;
+  observedAt?: string | null;
+  ageMinutes?: number | null;
+  reason?: string | null;
+}
+
+export interface MarineConditions {
+  source?: string;
+  stationName?: string;
+  observedAt?: string;
+  waterTemperatureC?: number | null;
+  salinityPsu?: number | null;
+  airTemperatureC?: number | null;
+  airPressureHpa?: number | null;
+  windSpeedMS?: number | null;
+  windDirectionDeg?: number | null;
+  gustSpeedMS?: number | null;
+  waveHeightM?: number | null;
+  significantWaveHeightM?: number | null;
+  averageWaveHeightM?: number | null;
+  wavePeriodS?: number | null;
 }
 
 export interface DashboardData {
   station?: { stationId?: string; stationName?: string };
+  requestContext?: RequestContext;
   current?: CurrentConditions;
+  marine?: MarineConditions | null;
   forecastTimeline?: ForecastPoint[];
+  forecastSummary?: ForecastSummary | null;
   missionEvaluation?: {
+    missionType?: string;
     evaluationStatus?: string;
-    passed?: boolean;
+    passed?: boolean | null;
     missionGrade?: string | null;
     factors?: MissionFactor[];
     ruleVersion?: string;
+    reasonCodes?: string[];
   };
   diagnosis?: { fogLabel?: string; pmDisplayGrade?: string; summary?: string } | null;
-  sourceStatus?: Array<{ source: string; status: string; observedAt?: string }>;
+  sourceStatus?: SourceStatusDetail[];
   apiStatus?: {
     overall?: { code?: string; label?: string };
     summary?: { good?: number; delayed?: number; fail?: number };
     sources?: Array<{ source?: string; displayName?: string; code?: string; label?: string }>;
   };
-  meta?: { requestId?: string; generatedAt?: string; partial?: boolean };
+  meta?: { requestId?: string; generatedAt?: string; partial?: boolean; mock?: boolean };
 }
 
 export interface DashboardMapPoint {
@@ -134,6 +182,7 @@ export interface DashboardMapPoint {
 }
 
 export interface DashboardViewProps {
+  centerId?: string;
   config: DashboardConfig;
   missionStations: DashboardStation[];
   dashboard: DashboardData | null;
@@ -149,4 +198,5 @@ export interface DashboardViewProps {
   onStationSelect: (stationId: string) => void;
   onRefresh: () => void;
   onSubmit: () => void;
+  onLogout?: () => void;
 }

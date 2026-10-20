@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { ApiError, getDashboard, getDashboardConfig, type MapViewport } from '../../api';
-import { stationsInViewport, toDashboardConfig, toViewModel } from './dashboardAdapter';
+import { stationsInViewport, toDashboardConfig, toDashboardData } from './dashboardAdapter';
 import DashboardView from './DashboardView';
 import type { DashboardConfig, DashboardData, MissionValue, MissionValueKey, MissionValues } from './types';
 
 const EMPTY_CONFIG: DashboardConfig = { stations: [], forecastIntervalOptionsH: [], missionTypes: [] };
 const EMPTY_VALUES: MissionValues = { stationId: '', forecastIntervalH: '', missionType: '' };
+const INITIAL_CONFIG_BOUNDS = { west: 124, south: 37, east: 127, north: 38.3 };
 
 interface DashboardPageProps {
+  centerId: string;
   mapTilesEnabled?: boolean;
   onUnauthorized: () => void;
 }
 
-export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }: DashboardPageProps) {
+export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnauthorized }: DashboardPageProps) {
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [mapMode, setMapMode] = useState<'current' | 'forecast'>('current');
@@ -35,7 +37,7 @@ export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }
     async function initialize() {
       setLoading(true);
       try {
-        const configResponse = await getDashboardConfig({ signal: controller.signal });
+        const configResponse = await getDashboardConfig(INITIAL_CONFIG_BOUNDS, { signal: controller.signal });
         const nextConfig = toDashboardConfig(configResponse.data);
         setConfig(nextConfig);
 
@@ -44,7 +46,7 @@ export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }
         const missionType = nextConfig.missionTypes[0]?.missionType;
         if (stationId && forecastIntervalH && missionType) {
           const response = await getDashboard({ stationId, forecastIntervalH, missionType }, { signal: controller.signal });
-          setDashboard(toViewModel<DashboardData>(response.data));
+          setDashboard(toDashboardData(response.data));
         }
       } catch (requestError) {
         if (!(requestError instanceof Error && requestError.name === 'AbortError')) setError(errorMessage(requestError));
@@ -58,6 +60,28 @@ export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }
   }, []);
 
   const visibleStations = stationsInViewport(config.stations, mapViewport);
+
+  useEffect(() => {
+    if (!mapViewport) return;
+    const bounds = mapViewport;
+    const controller = new AbortController();
+
+    async function refreshConfig() {
+      try {
+        const response = await getDashboardConfig(bounds, { signal: controller.signal });
+        const nextConfig = toDashboardConfig(response.data);
+        setConfig((current) => ({
+          ...nextConfig,
+          fogLayer: nextConfig.fogLayer ?? current.fogLayer,
+        }));
+      } catch (requestError) {
+        if (!(requestError instanceof Error && requestError.name === 'AbortError')) setError(errorMessage(requestError));
+      }
+    }
+
+    void refreshConfig();
+    return () => controller.abort();
+  }, [mapViewport]);
 
   useEffect(() => {
     if (!mapViewport) return;
@@ -79,7 +103,7 @@ export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }
     setError('');
     try {
       const response = await getDashboard(request);
-      setDashboard(toViewModel<DashboardData>(response.data));
+      setDashboard(toDashboardData(response.data));
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -111,7 +135,13 @@ export default function DashboardPage({ mapTilesEnabled = true, onUnauthorized }
 
   const handleMapViewportChange = useCallback((viewport: MapViewport) => setMapViewport(viewport), []);
 
-  const handleChange = (key: MissionValueKey, value: MissionValue) => setValues((current) => ({ ...current, [key]: value } as MissionValues));
+  const handleChange = (key: MissionValueKey, value: MissionValue) => {
+    if (key === 'stationId') {
+      handleStationSelect(String(value));
+      return;
+    }
+    setValues((current) => ({ ...current, [key]: value } as MissionValues));
+  };
 
-  return <DashboardView config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} loading={loading} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onSubmit={handleSubmit} />;
+  return <DashboardView centerId={centerId} config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} loading={loading} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onSubmit={handleSubmit} onLogout={onUnauthorized} />;
 }

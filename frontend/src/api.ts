@@ -18,6 +18,13 @@ export interface DashboardRequest {
   stationId: string;
   forecastIntervalH: number;
   missionType: string;
+  asOf?: string;
+  mock?: boolean;
+}
+
+export interface HistoryRequest {
+  historyType?: string;
+  missionType?: string;
 }
 
 export interface MapViewport {
@@ -27,6 +34,8 @@ export interface MapViewport {
   north: number;
   zoom: number;
 }
+
+export type MapBounds = Omit<MapViewport, 'zoom'>;
 
 export class ApiError extends Error {
   code: string;
@@ -65,7 +74,8 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
 
   if (!response.ok || !SUCCESS_CODES.has(payload?.code)) {
     const errorData = payload?.data as { meta?: { request_id?: string } } | null;
-    throw new ApiError(payload?.message || '요청을 처리하지 못했습니다.', {
+    const detail = (payload as ApiEnvelope<T> & { detail?: string })?.detail;
+    throw new ApiError(payload?.message || detail || '요청을 처리하지 못했습니다.', {
       code: payload?.code,
       data: payload?.data,
       requestId: errorData?.meta?.request_id ?? payload?.meta?.request_id ?? null,
@@ -76,13 +86,35 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
   return payload;
 }
 
-export function buildDashboardUrl({ stationId, forecastIntervalH, missionType }: DashboardRequest) {
+export function buildDashboardUrl({ stationId, forecastIntervalH, missionType, asOf, mock }: DashboardRequest) {
   const query = new URLSearchParams({
     forecast_interval_h: String(forecastIntervalH),
     mission_type: missionType,
   });
 
+  if (asOf) query.set('as_of', asOf);
+  if (mock != null) query.set('mock', String(mock));
+
   return `/api/v1/stations/${encodeURIComponent(stationId)}/dashboard?${query}`;
+}
+
+export function buildDashboardConfigUrl({ south, west, north, east }: MapBounds) {
+  const query = new URLSearchParams({
+    south: String(south),
+    west: String(west),
+    north: String(north),
+    east: String(east),
+  });
+
+  return `/api/v1/dashboard/config?${query}`;
+}
+
+export function buildHistoryUrl({ historyType, missionType }: HistoryRequest = {}) {
+  const query = new URLSearchParams();
+  if (historyType && historyType !== 'ALL') query.set('history_type', historyType);
+  if (missionType && missionType !== 'ALL') query.set('mission_type', missionType);
+  const suffix = query.toString();
+  return `/api/v1/history${suffix ? `?${suffix}` : ''}`;
 }
 
 export function login(centerId: string, password: string, options?: RequestInit) {
@@ -94,10 +126,18 @@ export function login(centerId: string, password: string, options?: RequestInit)
   });
 }
 
-export function getDashboardConfig(options?: RequestInit) {
-  return request<unknown>('/api/v1/dashboard/config', options);
+export function getDashboardConfig(bounds: MapBounds, options?: RequestInit) {
+  return request<unknown>(buildDashboardConfigUrl(bounds), options);
 }
 
 export function getDashboard(params: DashboardRequest, options?: RequestInit) {
   return request<unknown>(buildDashboardUrl(params), options);
+}
+
+export function getAlertOperations(options?: RequestInit) {
+  return request<unknown>('/api/v1/alerts/operations', options);
+}
+
+export function getHistory(params: HistoryRequest = {}, options?: RequestInit) {
+  return request<unknown>(buildHistoryUrl(params), options);
 }

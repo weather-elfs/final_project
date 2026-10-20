@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { stationsInViewport, toDashboardConfig, toViewModel } from './dashboardAdapter';
+import { stationsInViewport, toDashboardConfig, toDashboardData, toViewModel } from './dashboardAdapter';
 
 test('API snake_case를 UI camelCase로 변환하고 비활성 항목을 제외한다', () => {
   const config = toDashboardConfig({
@@ -13,6 +13,114 @@ test('API snake_case를 UI camelCase로 변환하고 비활성 항목을 제외�
   assert.deepEqual(config.missionTypes.map(({ missionType }) => missionType), ['A']);
   assert.deepEqual(config.forecastIntervalOptionsH, [1, 3, 6, 12]);
   assert.deepEqual(toViewModel({ mission_evaluation: { rule_version: 'v1' } }), { missionEvaluation: { ruleVersion: 'v1' } });
+});
+
+test('백엔드 설정 응답의 forecast_intervals_h 별칭을 지원한다', () => {
+  const config = toDashboardConfig({
+    stations: [],
+    mission_types: [],
+    forecast_intervals_h: [1, 3, 6, 12],
+  });
+
+  assert.deepEqual(config.forecastIntervalOptionsH, [1, 3, 6, 12]);
+});
+
+test('백엔드의 고정 FAIL 상태를 현재 자료 지연과 예측 미제공으로 구분한다', () => {
+  const config = toDashboardConfig({
+    stations: [{
+      station_id: '112',
+      station_name: '인천',
+      latitude: 37.47772,
+      longitude: 126.6249,
+      available: true,
+      current_status: 'FAIL',
+      forecast_status: 'FAIL',
+    }],
+    mission_types: [],
+    forecast_intervals_h: [1, 3, 6, 12],
+  });
+
+  assert.equal(config.stations[0]?.currentStatus, 'DELAYED');
+  assert.equal(config.stations[0]?.forecastStatus, 'NOT_AVAILABLE');
+});
+
+test('백엔드 대시보드 응답의 소스 상태 객체와 해양 자료를 UI 모델로 변환한다', () => {
+  const dashboard = toDashboardData({
+    station: { station_id: '112', station_name: '인천' },
+    current: {
+      observed_at: '2026-09-18T09:00:00+09:00',
+      temperature_c: 18,
+      relative_humidity_pct: 81,
+      visibility_km: 4.8,
+    },
+    marine: {
+      water_temperature_c: 21.4,
+      salinity_psu: 31.2,
+      wave_height_m: null,
+    },
+    source_status: {
+      asos: { status: 'OK', observed_at: '2026-09-18T09:00:00+09:00', age_minutes: 0, reason: null },
+      airkorea: { status: 'STALE', observed_at: '2026-09-18T08:00:00+09:00', age_minutes: 60, reason: '지연' },
+      marine: { status: 'MISSING', observed_at: null, age_minutes: null, reason: '결측' },
+    },
+    forecast_timeline: [],
+    mission_evaluation: { evaluation_status: 'NOT_EVALUABLE' },
+  });
+
+  assert.deepEqual(dashboard.sourceStatus?.map(({ source, status }) => ({ source, status })), [
+    { source: 'asos', status: 'OK' },
+    { source: 'airkorea', status: 'STALE' },
+    { source: 'marine', status: 'MISSING' },
+  ]);
+  assert.deepEqual(dashboard.apiStatus?.summary, { good: 1, delayed: 1, fail: 1 });
+  assert.equal(dashboard.marine?.waterTemperatureC, 21.4);
+  assert.equal(dashboard.marine?.waveHeightM, null);
+});
+
+test('최신 백엔드 예측 응답과 fresh/delayed/missing 상태를 UI 모델로 변환한다', () => {
+  const dashboard = toDashboardData({
+    request_context: {
+      forecast_interval_h: 3,
+      forecast_horizons_h: [3, 6, 9, 12],
+      mission_type: 'MARITIME_TRANSPORT',
+    },
+    source_status: [
+      { source: 'ASOS', status: 'fresh' },
+      { source: 'AIRKOREA', status: 'delayed' },
+      { source: 'TIDE_OBSERVATORY', status: 'missing' },
+    ],
+    forecast_timeline: [{
+      horizon_h: 3,
+      valid_at: '2022-01-01T04:00:00+09:00',
+      visibility_pred_km: 4.2,
+      visibility_grade: 'MODERATE',
+      fog_grade_label: '옅은 안개',
+      pm25_pred_ug_m3: 18.2,
+      pm10_pred_ug_m3: 31.4,
+    }],
+    forecast_summary: {
+      horizon_h: 3,
+      visibility_pred_km: 4.2,
+      selection_reason: 'MIN_VISIBILITY',
+    },
+    mission_evaluation: {
+      mission_type: 'MARITIME_TRANSPORT',
+      evaluation_status: 'EVALUATED',
+      passed: true,
+      mission_grade: 'NORMAL',
+      reason_codes: ['VISIBILITY_OK'],
+    },
+    meta: { mock: false },
+  });
+
+  assert.equal(dashboard.requestContext?.forecastIntervalH, 3);
+  assert.equal(dashboard.forecastTimeline?.[0]?.visibilityGrade, 'MODERATE');
+  assert.equal(dashboard.forecastTimeline?.[0]?.pm25PredUgM3, 18.2);
+  assert.equal(dashboard.forecastSummary?.selectionReason, 'MIN_VISIBILITY');
+  assert.equal(dashboard.missionEvaluation?.missionType, 'MARITIME_TRANSPORT');
+  assert.deepEqual(dashboard.missionEvaluation?.reasonCodes, ['VISIBILITY_OK']);
+  assert.deepEqual(dashboard.apiStatus?.summary, { good: 1, delayed: 1, fail: 1 });
+  assert.equal(dashboard.meta?.mock, false);
 });
 
 test('설정 응답의 좌표로 현재 지도 범위 안 관측소만 반환한다', () => {

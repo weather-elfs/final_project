@@ -28,7 +28,8 @@ export const dashboardConfig = {
       { station_id: '112', station_name: '인천', latitude: 37.47772, longitude: 126.6249, available: true, current_status: 'GOOD', forecast_status: 'RETRY_SUCCESS' },
       { station_id: '201', station_name: '강화', latitude: 37.70739, longitude: 126.44634, available: true, current_status: 'GOOD', forecast_status: 'GOOD' },
     ],
-    forecast_interval_options_h: [1, 3, 6, 12],
+    forecast_intervals_h: [1, 3, 6, 12],
+    forecast_slots: 4,
     mission_types: [
       {
         mission_type: 'MARITIME_TRANSPORT',
@@ -36,13 +37,6 @@ export const dashboardConfig = {
         enabled: true,
         rule_version: 'maritime-transport-v1',
         required_metrics: ['visibility_pred_km'],
-      },
-      {
-        mission_type: 'PORT_ENTRY_EXIT',
-        display_name: '입출항·접안',
-        enabled: false,
-        rule_version: null,
-        required_metrics: ['visibility_pred_km', 'wind_speed_pred_m_s'],
       },
     ],
     fog_layer: gk2aFogLayer,
@@ -71,10 +65,12 @@ function validAt(horizonH: number) {
 
 function forecastPoint(snapshot: StationSnapshot, horizonH: number, slot: number) {
   const visibility = Math.max(0.2, snapshot.current.visibility_km - slot * 0.25);
+  const visibilityGrade = visibility >= 10 ? 'GOOD' : visibility >= 4 ? 'MODERATE' : visibility >= 1 ? 'BAD' : 'VERY_BAD';
   return {
     horizon_h: horizonH,
     valid_at: validAt(horizonH),
     visibility_pred_km: Number(visibility.toFixed(1)),
+    visibility_grade: visibilityGrade,
     pm1_pred_ug_m3: snapshot.current.pm1_ug_m3 + slot,
     pm25_pred_ug_m3: snapshot.current.pm25_ug_m3 + slot * 2,
     pm10_pred_ug_m3: snapshot.current.pm10_ug_m3 + slot * 2,
@@ -89,7 +85,7 @@ function forecastPoint(snapshot: StationSnapshot, horizonH: number, slot: number
   };
 }
 
-export function dashboardFixture(stationId: string, forecastIntervalH: number) {
+export function dashboardFixture(stationId: string, forecastIntervalH: number, mock = false) {
   const snapshot = stationSnapshots[stationId];
   if (!snapshot) return null;
   const forecastTimeline = [1, 2, 3, 4].map((slot) => forecastPoint(snapshot, forecastIntervalH * slot, slot));
@@ -112,34 +108,49 @@ export function dashboardFixture(stationId: string, forecastIntervalH: number) {
         aqi: { value: 84, display_level: 1, display_grade: '양호', status: 'calculated' },
         status: 'fresh',
       },
+      marine: {
+        source: 'raw_tide_observatory',
+        station_name: stationId === '102' ? '소청초' : '인천',
+        observed_at: OBSERVED_AT,
+        water_temperature_c: 21.4,
+        salinity_psu: 31.2,
+        air_temperature_c: null,
+        air_pressure_hpa: 1013.2,
+        wind_speed_m_s: 3.1,
+        wind_direction_deg: 300,
+        gust_speed_m_s: null,
+        wave_height_m: null,
+      },
       forecast_timeline: forecastTimeline,
+      forecast_summary: {
+        ...forecastTimeline.find((point) => point.visibility_pred_km === minimumVisibility),
+        selection_reason: 'MIN_VISIBILITY',
+      },
       mission_evaluation: {
         mission_type: 'MARITIME_TRANSPORT',
         rule_version: 'maritime-transport-v1',
-        evaluation_status: 'EVALUATED',
-        passed,
-        mission_grade: passed ? 'NORMAL' : 'RESTRICTED',
-        factors: [{ metric: 'visibility_pred_km', actual: minimumVisibility, operator: '>=', threshold: 1, unit: 'km', required: true, passed }],
-        reason_codes: [passed ? 'VISIBILITY_OK' : 'VISIBILITY_BELOW_MINIMUM'],
+        evaluation_status: mock ? 'NOT_EVALUABLE' : 'EVALUATED',
+        passed: mock ? null : passed,
+        mission_grade: mock ? 'UNKNOWN' : passed ? 'NORMAL' : 'RESTRICTED',
+        factors: mock ? [] : [{ metric: 'visibility_pred_km', actual: minimumVisibility, operator: '>=', threshold: 1, unit: 'km', required: true, passed }],
+        reason_codes: mock ? ['MOCK_DATA'] : [passed ? 'VISIBILITY_OK' : 'VISIBILITY_BELOW_MINIMUM'],
       },
       diagnosis: { fog_label: snapshot.current.fog_grade_label, pm_display_grade: '양호', summary: '안개 영향 우세 · 대기질은 보조 요인' },
       source_status: [
         { source: 'ASOS', status: 'fresh', observed_at: OBSERVED_AT },
         { source: 'AIRKOREA', status: 'fresh', observed_at: OBSERVED_AT },
-        { source: 'BUOY', status: 'failed', observed_at: '2026-09-18T08:00:00+09:00' },
-        { source: 'KMA', status: 'fresh', observed_at: OBSERVED_AT },
+        { source: 'TIDE_OBSERVATORY', status: 'delayed', observed_at: '2026-09-18T08:00:00+09:00', age_minutes: 60, reason: '관측 시각 지연' },
       ],
       api_status: {
-        overall: { code: 'FAIL', label: 'Fail' },
-        summary: { good: 3, delayed: 0, fail: 1 },
+        overall: { code: 'DELAYED', label: 'Delayed' },
+        summary: { good: 2, delayed: 1, fail: 0 },
         sources: [
           { source: 'ASOS', display_name: '기상청 ASOS', code: 'GOOD', label: 'Good', attempts: 1 },
           { source: 'AIRKOREA', display_name: '에어코리아', code: 'GOOD', label: 'Good', attempts: 1 },
-          { source: 'BUOY', display_name: '해양기상부이', code: 'FAIL', label: 'Fail', attempts: 3 },
-          { source: 'KMA', display_name: '기상청 단기예보', code: 'GOOD', label: 'Good', attempts: 1 },
+          { source: 'TIDE_OBSERVATORY', display_name: '해양관측소', code: 'DELAYED', label: 'Delayed', attempts: 1 },
         ],
       },
-      meta: { request_id: `req_20260918_${stationId}_${forecastIntervalH}`, generated_at: '2026-09-18T09:05:00+09:00', partial: true },
+      meta: { request_id: `req_20260918_${stationId}_${forecastIntervalH}`, generated_at: '2026-09-18T09:05:00+09:00', partial: true, mock },
     },
   };
 }
