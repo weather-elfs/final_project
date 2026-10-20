@@ -3,7 +3,7 @@ import uuid
 from fastapi.responses import JSONResponse
 from datetime import timedelta
 from backend.model_predict import predict_visibility_pm
-from backend.kma_weather import asos_wind_direction
+from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
@@ -867,7 +867,17 @@ def station_dashboard(
                 ],
                 "mission_type": mission_type,
             },
+            "kma_forecast": (kma_forecast := fetch_realtime_weather(station_id)),
             "current": {
+                "weather_label": (
+                    kma_forecast.get("weather_label") if kma_forecast else None
+                ),
+                "weather_source": (
+                    kma_forecast.get("source") if kma_forecast else None
+                ),
+                "weather_forecast_at": (
+                    kma_forecast.get("forecast_at") if kma_forecast else None
+                ),
                 "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
                 "temperature_c": json_number(row["temp"]),
                 "relative_humidity_pct": json_number(row["humidity"]),

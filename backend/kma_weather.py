@@ -196,3 +196,103 @@ def asos_wind_direction(wd):
         "wind_direction_deg": degrees,
         "wind_direction_label": wind_direction_label(degrees),
     }
+
+
+def latest_forecast_base(now=None):
+    """최신 기상청 단기예보 발표 시각 계산."""
+    now = now or datetime.now(KST)
+
+    for days_ago in (0, 1):
+        day = (now - timedelta(days=days_ago)).date()
+
+        for hour in (23, 20, 17, 14, 11, 8, 5, 2):
+            candidate = datetime(day.year, day.month, day.day, hour, tzinfo=KST)
+            if candidate + timedelta(minutes=20) <= now:
+                return candidate
+
+    return None
+
+
+from functools import lru_cache
+
+
+def fetch_realtime_weather(station_id):
+    """관측소별 가장 가까운 미래 단기예보 조회."""
+    now = datetime.now(KST)
+    base = latest_forecast_base(now)
+
+    if base is None:
+        return None
+
+    target = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+
+    return _fetch_realtime_weather_cached(str(station_id), base, target)
+
+
+@lru_cache(maxsize=64)
+def _fetch_realtime_weather_cached(station_id, base, target):
+    """기상청 단기예보 SKY/PTY 조회."""
+    import requests
+
+    station_grids = {
+        "112": (55, 124),  # 인천
+        "102": (21, 135),  # 백령도
+        "201": (51, 129),  # 강화도
+    }
+
+    station_id = str(station_id)
+    if station_id not in station_grids:
+        return None
+
+    api_key = os.getenv("KMA_API_KEY")
+    if not api_key:
+        return None
+
+    if base is None:
+        return None
+
+    nx, ny = station_grids[station_id]
+    grid_idx = (ny - 1) * 149 + (nx - 1)
+
+    url = "https://apihub.kma.go.kr/api/typ01/" "cgi-bin/url/nph-dfs_shrt_grd"
+
+    values = {}
+
+    try:
+        for category in ("SKY", "PTY"):
+            params = {
+                "tmfc": base.strftime("%Y%m%d%H"),
+                "tmef": target.strftime("%Y%m%d%H"),
+                "vars": category,
+                "authKey": api_key,
+            }
+
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+
+            grid = [x.strip() for x in response.text.split(",")]
+            if grid_idx >= len(grid):
+                return None
+
+            raw = float(grid[grid_idx])
+            if raw in (-999, -999.9, -99):
+                values[category] = None
+            else:
+                values[category] = str(int(raw))
+
+    except (requests.RequestException, ValueError, IndexError):
+        return None
+
+    label = weather_label(values.get("SKY"), values.get("PTY"))
+
+    if label is None:
+        return None
+
+    return {
+        "weather_label": label,
+        "sky": values.get("SKY"),
+        "pty": values.get("PTY"),
+        "source": "KMA_VILAGE_FORECAST",
+        "issued_at": base.isoformat(),
+        "forecast_at": target.isoformat(),
+    }
