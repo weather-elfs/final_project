@@ -3,6 +3,7 @@ import uuid
 from fastapi.responses import JSONResponse
 from datetime import timedelta
 from backend.model_predict import predict_visibility_pm
+from backend.kma_weather import asos_wind_direction
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
@@ -872,6 +873,12 @@ def station_dashboard(
                 "relative_humidity_pct": json_number(row["humidity"]),
                 "wind_speed_m_s": json_number(row["wind_speed"]),
                 "visibility_km": visibility_km,
+                "wind_direction_deg": asos_wind_direction(row["wind_dir"])[
+                    "wind_direction_deg"
+                ],
+                "wind_direction_label": asos_wind_direction(row["wind_dir"])[
+                    "wind_direction_label"
+                ],
                 "status": to_contract_source_status(
                     get_source_detail(row["tm"], reference_time)
                 )["status"],
