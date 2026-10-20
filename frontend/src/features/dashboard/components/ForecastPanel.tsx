@@ -6,26 +6,23 @@ interface ForecastPanelProps {
   dashboard: DashboardData | null;
   requested: boolean;
   loading: boolean;
+  available?: boolean;
 }
 
-export default function ForecastPanel({ dashboard, requested, loading }: ForecastPanelProps) {
+export default function ForecastPanel({ dashboard, requested, loading, available = true }: ForecastPanelProps) {
   const forecast = dashboard?.forecastTimeline ?? [];
-  const intervalH = forecast[0]?.horizonH;
-  const lowestVisibilityPoint = forecast.reduce<(typeof forecast)[number] | null>((lowest, point) => {
+  const intervalH = dashboard?.requestContext?.forecastIntervalH ?? forecast[0]?.horizonH;
+  const calculatedLowestVisibilityPoint = forecast.reduce<(typeof forecast)[number] | null>((lowest, point) => {
     if (point.visibilityPredKm == null) return lowest;
     if (lowest?.visibilityPredKm == null || point.visibilityPredKm < lowest.visibilityPredKm) return point;
     return lowest;
   }, null);
+  const lowestVisibilityPoint = dashboard?.forecastSummary ?? calculatedLowestVisibilityPoint;
 
   const forecastTime = (value?: string) => formatKstTime(value).slice(0, 5);
-  const temperature = (value?: number | null) => value == null ? '—' : `${value.toFixed(0)}°C`;
   const stageAndLabel = (visibilityKm?: number | null) => {
     const grade = fogGradeByVisibility(visibilityKm);
     return `${grade.stage ? `${grade.stage}/6단계` : '—/6단계'} ${grade.label}`;
-  };
-  const airQuality = (point: (typeof forecast)[number]) => {
-    const level = point.aqi?.displayLevel == null ? '—' : point.aqi.displayLevel;
-    return `${level}/5단계 ${point.aqi?.displayGrade ?? '판단 대기'}`;
   };
 
   return (
@@ -36,7 +33,9 @@ export default function ForecastPanel({ dashboard, requested, loading }: Forecas
           <p>{dashboard?.station?.stationName ?? '관측소'}({dashboard?.station?.stationId ?? '—'}) · {intervalH ?? '—'}시간 간격</p>
         )}
       </div>
-      {!requested ? (
+      {!available ? (
+        <div className="forecast-empty"><strong>예측 서비스 미제공</strong><span>현재 관측 자료는 확인할 수 있지만 예측 모델은 아직 연동되지 않았습니다.</span></div>
+      ) : !requested ? (
         <div className="forecast-empty"><strong>예측 결과가 없습니다</strong><span>작전 환경을 설정한 뒤 시간대별 예측을 실행하세요.</span></div>
       ) : loading ? (
         <div className="forecast-empty" role="status"><strong>예측 결과 조회 중</strong><span>선택한 조건의 4개 시점을 불러오고 있습니다.</span></div>
@@ -54,15 +53,13 @@ export default function ForecastPanel({ dashboard, requested, loading }: Forecas
                 </tr>
               </thead>
               <tbody>
-                <tr><th scope="row">날씨</th>{forecast.map((point) => <td key={`weather-${point.horizonH}-${point.validAt}`}>{point.weatherLabel ?? '자료 없음'}</td>)}</tr>
-                <tr><th scope="row">기온</th>{forecast.map((point) => <td key={`temperature-${point.horizonH}-${point.validAt}`}>{temperature(point.temperatureC)}</td>)}</tr>
-                <tr><th scope="row">풍향·풍속</th>{forecast.map((point) => <td className="forecast-cell-lines" key={`wind-${point.horizonH}-${point.validAt}`}><span>{point.windDirectionLabel ?? '자료 없음'}</span><span>{metric(point.windSpeedMS, 'm/s', 1)}</span></td>)}</tr>
                 <tr className="forecast-visibility-row"><th scope="row">시정</th>{forecast.map((point) => <td key={`visibility-${point.horizonH}-${point.validAt}`}>{metric(point.visibilityPredKm, 'km', 1)}</td>)}</tr>
                 <tr><th scope="row">안개 단계</th>{forecast.map((point) => {
                   const grade = fogGradeByVisibility(point.visibilityPredKm);
-                  return <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}><span>{grade.stage ? `${grade.stage}/6단계` : '—/6단계'}</span><span>{grade.label}</span></td>;
+                  return <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}><span>{grade.stage ? `${grade.stage}/6단계` : '—/6단계'}</span><span>{point.fogGradeLabel ?? grade.label}</span></td>;
                 })}</tr>
-                <tr><th scope="row">대기질</th>{forecast.map((point) => <td className="forecast-cell-lines" key={`aqi-${point.horizonH}-${point.validAt}`}><span>{airQuality(point).split(' ')[0]}</span><span>{airQuality(point).split(' ').slice(1).join(' ')}</span></td>)}</tr>
+                <tr><th scope="row">PM2.5</th>{forecast.map((point) => <td key={`pm25-${point.horizonH}-${point.validAt}`}>{metric(point.pm25PredUgM3, '㎍/m³', 1)}</td>)}</tr>
+                <tr><th scope="row">PM10</th>{forecast.map((point) => <td key={`pm10-${point.horizonH}-${point.validAt}`}>{metric(point.pm10PredUgM3, '㎍/m³', 1)}</td>)}</tr>
               </tbody>
             </table>
           </div>
