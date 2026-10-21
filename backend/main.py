@@ -881,6 +881,11 @@ def station_dashboard(
                 "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
                 "temperature_c": json_number(row["temp"]),
                 "relative_humidity_pct": json_number(row["humidity"]),
+                "temperature_dewpoint_spread_c": (
+                    round(float(row["temp"]) - float(row["dew_point"]), 2)
+                    if row["temp"] is not None and row["dew_point"] is not None
+                    else None
+                ),
                 "wind_speed_m_s": json_number(row["wind_speed"]),
                 "visibility_km": visibility_km,
                 "wind_direction_deg": asos_wind_direction(row["wind_dir"])[
