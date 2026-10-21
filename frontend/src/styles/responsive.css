@@ -217,6 +217,9 @@
   .fog-criteria-items {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .fog-criteria-items .stage-criteria-item:first-child {
+    grid-column: 1 / -1;
+  }
   .air-quality-criteria-items {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

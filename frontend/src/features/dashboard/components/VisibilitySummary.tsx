@@ -1,24 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { aqiGradeTone, fogGradeByVisibility } from '../gradeTones';
+import { AIR_QUALITY_CRITERIA, airQualityByParticles, fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData, SourceStatusDetail } from '../types';
 
 const FOG_CRITERIA = [
-  { stage: '1/6단계', label: '옅은 안개', range: '4–10 km', tone: 'green' },
+  { stage: '안개 없음', label: '시정 양호', range: '10 km 이상', tone: 'sky' },
+  { stage: '1/6단계', label: '옅은 안개', range: '4–10 km 미만', tone: 'green' },
   { stage: '2/6단계', label: '옅은 안개', range: '2–4 km', tone: 'yellow' },
   { stage: '3/6단계', label: '안개', range: '1–2 km', tone: 'orange' },
   { stage: '4/6단계', label: '안개', range: '500 m–1 km', tone: 'red' },
   { stage: '5/6단계', label: '짙은 안개', range: '200–500 m', tone: 'purple' },
   { stage: '6/6단계', label: '짙은 안개', range: '200 m 미만', tone: 'maroon' },
-] as const;
-
-const AIR_QUALITY_CRITERIA = [
-  { stage: '1/5단계', label: '양호', range: 'AQI 0–100', tone: 'green' },
-  { stage: '2/5단계', label: '민감군 주의', range: 'AQI 101–150', tone: 'orange' },
-  { stage: '3/5단계', label: '나쁨', range: 'AQI 151–200', tone: 'red' },
-  { stage: '4/5단계', label: '매우 나쁨', range: 'AQI 201–300', tone: 'purple' },
-  { stage: '5/5단계', label: '위험', range: 'AQI 301 이상', tone: 'maroon' },
 ] as const;
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -87,8 +80,8 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
   const statusLabel = errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
   const statusTone = errors ? 'error' : delayed ? 'delayed' : 'good';
   const fogGrade = fogGradeByVisibility(current?.visibilityKm);
-  const aqiLabel = current?.aqi?.displayGrade ?? diagnosis?.pmDisplayGrade ?? '판단 대기';
-  const fogDetail = fogGrade.stage ? `${fogGrade.label} · ${fogGrade.rangeLabel}` : fogGrade.label;
+  const airQuality = airQualityByParticles(current?.pm25UgM3, current?.pm10UgM3);
+  const fogDetail = fogGrade.rangeLabel === '자료 없음' ? fogGrade.label : `${fogGrade.label} · ${fogGrade.rangeLabel}`;
   const sourceStatuses = [...(dashboard?.sourceStatus ?? [])].sort((left, right) => {
     const leftOrder = SOURCE_ORDER.indexOf(left.source.toUpperCase());
     const rightOrder = SOURCE_ORDER.indexOf(right.source.toUpperCase());
@@ -245,25 +238,27 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
             <section className="stage-criteria-section" aria-labelledby="air-quality-criteria-title">
               <div className="stage-criteria-section-title">
                 <h5 id="air-quality-criteria-title">대기질 단계 · 5등급</h5>
-                <span>AirNow AQI · 색각 보조</span>
+                <span>PM 기반 AQI 추정 · 색각 보조</span>
               </div>
               <div className="stage-criteria-items air-quality-criteria-items">
                 {AIR_QUALITY_CRITERIA.map((item) => (
                   <div className="stage-criteria-item" key={item.stage}>
-                    <b className={`stage-criteria-badge grade-tone-${item.tone}`}>{item.stage}</b>
+                    <b className={`stage-criteria-badge grade-tone-${item.tone}`}>{item.stage}/5단계</b>
                     <span>{item.label}<small>{item.range}</small></span>
                   </div>
                 ))}
               </div>
             </section>
 
-            <p className="stage-criteria-note">상태명은 옅은 안개·안개·짙은 안개로 통일한 프로젝트 UI 기준</p>
+            <p className="stage-criteria-note">안개는 시정 기반 프로젝트 UI 분류이며, 10 km 이상은 안개 없음으로 표시합니다.</p>
+            <p className="stage-criteria-note">대기질은 PM2.5·PM10을 각각 환산한 지수 중 높은 값입니다. 두 값이 모두 있어야 계산하며, 하나라도 누락되면 판단 대기입니다.</p>
+            <p className="stage-criteria-note">단일 관측값 기반 추정으로, 24시간 평균·NowCast 및 다른 오염물질을 반영한 공식 AQI가 아닙니다. <a href="https://document.airnow.gov/technical-assistance-document-for-the-reporting-of-daily-air-quailty.pdf" target="_blank" rel="noreferrer">EPA/AirNow 산식·농도 구간(2026)</a>을 사용하며 0–100은 프로젝트 기준 양호 1단계로 묶습니다.</p>
           </div>
         )}
       </div>
       <div className="impact-grid">
-        <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGrade.tone}`}>{fogGrade.stage ? `${fogGrade.stage}/6단계` : '—/6단계'}</b></article>
-        <article><div><strong>대기질</strong><span>AQI {current?.aqi?.value ?? '—'} · {aqiLabel}</span></div><b className={`factor-stage grade-tone-${aqiGradeTone(aqiLabel)}`}>{current?.aqi?.displayLevel ?? '—'}/5단계</b></article>
+        <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGrade.tone}`}>{fogStageLabel(current?.visibilityKm)}</b></article>
+        <article><div><strong>대기질</strong><span>추정 AQI {airQuality.value ?? '—'} · {airQuality.label}</span></div><b className={`factor-stage grade-tone-${airQuality.tone}`}>{airQuality.stage ?? '—'}/5단계</b></article>
       </div>
       <p className="diagnosis-summary">종합 추정: {diagnosis?.summary ?? '데이터 대기'}</p>
 
