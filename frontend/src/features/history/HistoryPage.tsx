@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { getHistory } from '../../api';
+import { DEMO_MODE } from '../../demo';
 import SectionPageHeader from '../shared/SectionPageHeader';
 import { HISTORY_TYPE_LABELS, toHistoryData } from './historyAdapter';
 import type { HistoryData, HistoryRecord, HistoryType } from './types';
@@ -53,7 +54,7 @@ export default function HistoryPage({ referenceTime }: { referenceTime?: string 
     <main className="workspace-page-main" aria-busy={loading}>
       <SectionPageHeader
         title="이력 조회"
-        description="결과·경보·장애 이력을 조회하고 상세 판단 근거를 확인합니다."
+        description={DEMO_MODE ? '시연용 샘플 이력입니다. 실제 기상 조회 결과나 운영 기록을 저장·조회하지 않습니다.' : '결과·경보·장애 이력을 조회하고 상세 판단 근거를 확인합니다.'}
         referenceTime={referenceTime}
       />
       {error && <div className="workspace-error" role="alert">{error}</div>}

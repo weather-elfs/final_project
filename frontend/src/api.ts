@@ -1,3 +1,5 @@
+import { DEMO_CENTER, DEMO_MODE, demoAlertOperations, demoHistory, matchesDemoLogin } from './demo';
+
 const SUCCESS_CODES = new Set(['SUCCESS', 'PARTIAL_SUCCESS']);
 
 export interface ApiEnvelope<T> {
@@ -117,7 +119,14 @@ export function buildHistoryUrl({ historyType, missionType }: HistoryRequest = {
   return `/api/v1/history${suffix ? `?${suffix}` : ''}`;
 }
 
-export function login(centerId: string, password: string, options?: RequestInit) {
+export async function login(centerId: string, password: string, options?: RequestInit) {
+  if (DEMO_MODE) {
+    options?.signal?.throwIfAborted();
+    if (!matchesDemoLogin(centerId, password)) {
+      throw new ApiError('시연용 센터 ID와 비밀번호를 확인하세요.', { code: 'INVALID_DEMO_ACCESS', status: 401 });
+    }
+    return { code: 'SUCCESS', message: '시연 화면에 진입합니다.', data: { center: { ...DEMO_CENTER } } };
+  }
   return request<{ center: { id: string; name: string } }>('/api/v1/auth/login', {
     ...options,
     method: 'POST',
@@ -134,10 +143,18 @@ export function getDashboard(params: DashboardRequest, options?: RequestInit) {
   return request<unknown>(buildDashboardUrl(params), options);
 }
 
-export function getAlertOperations(options?: RequestInit) {
+export async function getAlertOperations(options?: RequestInit) {
+  if (DEMO_MODE) {
+    options?.signal?.throwIfAborted();
+    return demoAlertOperations();
+  }
   return request<unknown>('/api/v1/alerts/operations', options);
 }
 
-export function getHistory(params: HistoryRequest = {}, options?: RequestInit) {
+export async function getHistory(params: HistoryRequest = {}, options?: RequestInit) {
+  if (DEMO_MODE) {
+    options?.signal?.throwIfAborted();
+    return demoHistory(params);
+  }
   return request<unknown>(buildHistoryUrl(params), options);
 }

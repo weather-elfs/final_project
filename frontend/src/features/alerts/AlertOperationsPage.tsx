@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { getAlertOperations } from '../../api';
+import { DEMO_MODE } from '../../demo';
 import SectionPageHeader from '../shared/SectionPageHeader';
 import { toAlertOperationsData } from './alertAdapter';
 import type { AlertOperationsData, DecisionRecord } from './types';
@@ -43,7 +44,7 @@ export default function AlertOperationsPage({ referenceTime }: { referenceTime?:
     <main className="workspace-page-main" aria-busy={loading}>
       <SectionPageHeader
         title="경보 운영"
-        description="임무별 발령·해제 기준과 확인 지속시간을 사전 확정하고 판단 근거를 기록합니다."
+        description={DEMO_MODE ? '시연용 샘플 데이터입니다. 실제 경보 발령·해제·저장은 수행하지 않습니다.' : '임무별 발령·해제 기준과 확인 지속시간을 사전 확정하고 판단 근거를 기록합니다.'}
         referenceTime={referenceTime}
       />
       {error && <div className="workspace-error" role="alert">{error}</div>}
