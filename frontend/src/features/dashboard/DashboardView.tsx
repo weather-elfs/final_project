@@ -12,7 +12,7 @@ import MissionConditionsForm from './components/MissionConditionsForm';
 import VisibilitySummary from './components/VisibilitySummary';
 import WeatherMap from './components/WeatherMap';
 import { buildFogCoverageBounds } from './fogDistribution';
-import { buildMockForecastFogFrames } from './forecastFog';
+import { buildForecastFogDemoFrames } from './forecastFog';
 import { isForecastAvailable } from './stationStatus';
 import type { DashboardViewProps } from './types';
 
@@ -103,7 +103,7 @@ export default function DashboardView({
   );
   const forecastFogFrames = useMemo(
     () =>
-      buildMockForecastFogFrames(
+      buildForecastFogDemoFrames(
         config.fogLayer,
         dashboard?.forecastTimeline ?? [],
       ),
@@ -380,10 +380,14 @@ export default function DashboardView({
                   onViewportChange={onMapViewportChange}
                 />
                 <div className='map-source'>
-                  <span>
-                    지도 음영은 GK2A 탐지 격자를 평활화한 안개 분포 추정입니다.
-                  </span>
-                  <span>데이터 출처 ASOS · 해양부이 · GK2A · AirKorea</span>
+                  {(mapMode === 'forecast' || Boolean(config.fogLayer?.cells.length)) && (
+                    <span>
+                      {mapMode === 'forecast'
+                        ? '안개 이동은 과거 GK2A 격자 기반 시연용 목 데이터이며 실제 안개 예측이 아닙니다.'
+                        : '지도 음영은 GK2A 탐지 격자를 평활화한 안개 분포 추정입니다.'}
+                    </span>
+                  )}
+                  <span>{mapMode === 'forecast' ? '기상·예측 시점: API · 안개 음영: 이동 시연' : '데이터 출처 ASOS · 해양부이 · GK2A · AirKorea'}</span>
                 </div>
               </section>
 

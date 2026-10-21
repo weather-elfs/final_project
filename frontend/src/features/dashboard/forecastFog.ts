@@ -1,3 +1,5 @@
+import { gk2aFogLayer } from '../../mocks/gk2aFogLayer';
+import { toViewModel } from './dashboardAdapter';
 import type { FogMapLayer, ForecastPoint } from './types';
 
 export interface ForecastFogFrame {
@@ -8,6 +10,15 @@ export interface ForecastFogFrame {
 
 const LATITUDE_DRIFT_PER_FRAME = -0.024;
 const LONGITUDE_DRIFT_PER_FRAME = 0.085;
+const DEMO_FORECAST_FOG_LAYER = toViewModel<FogMapLayer>(gk2aFogLayer);
+
+// 예측 지도 음영 전용이다. API의 현재 관측·예측 수치나 config는 변경하지 않는다.
+export function buildForecastFogDemoFrames(
+  currentLayer: FogMapLayer | undefined,
+  forecastTimeline: ForecastPoint[],
+): ForecastFogFrame[] {
+  return buildMockForecastFogFrames(currentLayer ?? DEMO_FORECAST_FOG_LAYER, forecastTimeline);
+}
 
 export function interpolateFogMapLayer(
   fromLayer: FogMapLayer,

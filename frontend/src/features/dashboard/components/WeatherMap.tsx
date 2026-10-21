@@ -429,7 +429,12 @@ export default function WeatherMap({
             title={
               fogVisible ? 'GK2A 안개 분포 숨기기' : 'GK2A 안개 분포 표시'
             }
-            onClick={() => setFogVisible((visible) => !visible)}
+            onClick={() => {
+              if (fogVisible && forecastPlayback?.playing) {
+                forecastPlayback.onToggle();
+              }
+              setFogVisible((visible) => !visible);
+            }}
           >
             <span aria-hidden='true'>😶‍🌫️</span>
           </button>
@@ -444,7 +449,7 @@ export default function WeatherMap({
             기타 ASOS
           </span>
         </div>
-        {forecastPlayback && (
+        {fogVisible && forecastPlayback && (
           <div
             className='forecast-playback'
             aria-label='예측 레이어 시간 재생'
