@@ -5,6 +5,8 @@ from datetime import timedelta
 from backend.model_predict import predict_visibility_pm
 from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
 from fastapi.middleware.cors import CORSMiddleware
+from backend.aqi import calculate_current_aqi
+from backend.airkorea_live import read_live_airkorea
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
 
@@ -88,7 +90,7 @@ MARINE_MAPPING = {
 def get_station_current_status(conn, station_id):
     sql = """
         SELECT tm
-        FROM public.raw_weather_asos
+        FROM public.raw_weather_asos_realtime
         WHERE stn_id = %s
         ORDER BY tm DESC
         LIMIT 1
@@ -348,10 +350,119 @@ def to_contract_source_status(detail):
     }
 
 
+# ASOS 관측소 ID -> AirKorea 측정소
+AIR_STATION_MAP = {
+    "102": "백령도",
+    "112": "숭의",
+    "201": "석모리",
+}
+
+
+def get_station_aqi(conn, station_id, observed_at):
+    import csv
+    import math
+    from pathlib import Path
+    from datetime import datetime, timedelta
+
+    empty = calculate_current_aqi([], [])
+
+    if observed_at is None:
+        return empty
+
+    station_codes = {
+        "102": "831492",
+        "112": "823632",
+        "201": "831481",
+    }
+
+    code = station_codes.get(str(station_id))
+    if code is None:
+        return empty
+
+    anchor = observed_at.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+
+    root = Path(__file__).resolve().parents[1]
+
+    csv_files = [
+        root / "src/collectors/api/data/raw/airkorea/airkorea_realtime_3stations.csv",
+        root / "data/raw/airkorea/airkorea_realtime_3stations.csv",
+    ]
+
+    csv_files = sorted(
+        [p for p in csv_files if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+    )
+
+    hourly = {}
+
+    def numeric(value):
+        try:
+            number = float(value)
+            return number if math.isfinite(number) and number >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    for path in csv_files:
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            for record in csv.DictReader(f):
+                if str(record.get("측정소코드", "")).strip() != code:
+                    continue
+
+                try:
+                    tm = datetime.fromisoformat(record["날짜"])
+                    tm = tm.replace(tzinfo=None)
+                except (ValueError, TypeError, KeyError):
+                    continue
+
+                if tm.minute != 0 or tm.second != 0:
+                    continue
+
+                if anchor - timedelta(hours=11) <= tm <= anchor:
+                    hourly[tm] = (
+                        numeric(record.get("PM2.5")),
+                        numeric(record.get("PM10")),
+                    )
+
+    # 과거 DB 데이터도 조회해 CSV 누락 시 사용
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT a.pm25, a.pm10
+            FROM generate_series(
+                %s::timestamp - INTERVAL '11 hours',
+                %s::timestamp,
+                INTERVAL '1 hour'
+            ) AS h(obs_hour)
+            LEFT JOIN public.raw_air_quality a
+              ON a.tm = h.obs_hour
+             AND a.station_code = %s
+            ORDER BY h.obs_hour DESC
+        """,
+            (anchor, anchor, code),
+        )
+
+        db_rows = cur.fetchall()
+
+    pm25 = []
+    pm10 = []
+
+    for index, row in enumerate(db_rows):
+        tm = anchor - timedelta(hours=index)
+        live25, live10 = hourly.get(tm, (None, None))
+
+        db25 = row["pm25"] if isinstance(row, dict) else row[0]
+        db10 = row["pm10"] if isinstance(row, dict) else row[1]
+
+        pm25.append(live25 if live25 is not None else db25)
+        pm10.append(live10 if live10 is not None else db10)
+
+    return calculate_current_aqi(pm25, pm10)
+
+
 # 예측 시정거리 기준 안개등급 분류
 def get_fog_grade_label(visibility_km: float) -> str:
-    if visibility_km >= 10:
-        return "정상"
+    if visibility_km > 10:
+        return "안개 없음"
     elif visibility_km >= 2:
         return "옅은 안개"
     elif visibility_km >= 0.5:
@@ -633,7 +744,16 @@ def station_dashboard(
             },
         )
 
-    sql = """
+    # 조회 모드에 따라 ASOS 테이블 선택
+    # 날짜 미지정: 실시간 테이블
+    # 날짜 지정: 과거 데이터 테이블
+    asos_table = (
+        "public.raw_weather_asos"
+        if as_of is not None
+        else "public.raw_weather_asos_realtime"
+    )
+
+    sql = f"""
     SELECT
         tm,
         stn_id,
@@ -647,7 +767,7 @@ def station_dashboard(
         rainfall,
         cloud,
         visibility
-    FROM public.raw_weather_asos
+    FROM {asos_table}
     WHERE stn_id = %s
         AND (%s::timestamp IS NULL OR tm <= %s::timestamp)
     ORDER BY tm DESC
@@ -659,19 +779,31 @@ def station_dashboard(
         query_time = as_of.replace(tzinfo=None) if as_of is not None else None
 
         with get_connection() as conn:
-            # 1. ASOS 관측 데이터 조회
+            # ASOS 관측 데이터 조회
             with conn.cursor() as cur:
                 cur.execute(sql, (station_id, query_time, query_time))
                 row = cur.fetchone()
 
-            # 2. ASOS 관측 시각 기준 AirKorea 데이터 조회
+            # ASOS 관측 시각 기준 AirKorea 데이터 조회
             airkorea = (
                 get_airkorea_data(conn, station_id, row["tm"])
                 if row is not None
                 else None
             )
+            # AirKorea 관측 시각 기준 현재 AQI 계산
+            aqi_time = (
+                datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
+                if airkorea is not None
+                else None
+            )
 
-            # 3. 해양 데이터 조회
+            current_aqi = get_station_aqi(
+                conn,
+                station_id,
+                aqi_time,
+            )
+
+            # 해양 데이터 조회
             marine = (
                 get_marine_data(conn, station_id, row["tm"])
                 if row is not None
@@ -707,20 +839,48 @@ def station_dashboard(
         if as_of is not None
         else datetime.now(KST).replace(tzinfo=None)
     )
+    # 현재 조회는 실시간 CSV를 화면 표시용으로 사용
+    live_air = read_live_airkorea(station_id, reference_time) if as_of is None else None
+
+    display_airkorea = live_air["current"] if live_air is not None else airkorea
 
     # ASOS 상태
     asos_status = get_data_status(row["tm"], reference_time)
 
     # AirKorea 상태
     airkorea_time = (
-        datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
-        if airkorea is not None
+        datetime.fromisoformat(display_airkorea["observed_at"]).replace(tzinfo=None)
+        if display_airkorea is not None
+        else None
+    )
+    airkorea_status = get_data_status(airkorea_time, reference_time)
+
+    # AQI 관측자료 최신성 검증
+    AQI_MAX_AGE_HOURS = 2
+
+    aqi_age_hours = (
+        (reference_time - airkorea_time).total_seconds() / 3600
+        if airkorea_time is not None
         else None
     )
 
-    airkorea_status = get_data_status(airkorea_time, reference_time)
+    if aqi_age_hours is None or aqi_age_hours < 0 or aqi_age_hours > AQI_MAX_AGE_HOURS:
+        current_aqi = calculate_current_aqi([], [])
+
+    # 실시간 AirKorea CSV 기반 AQI 계산
+    if (
+        as_of is None
+        and live_air is not None
+        and aqi_age_hours is not None
+        and 0 <= aqi_age_hours <= AQI_MAX_AGE_HOURS
+    ):
+        current_aqi = calculate_current_aqi(
+            live_air["pm25_history"],
+            live_air["pm10_history"],
+        )
 
     # 해양 데이터 상태
+
     marine_time = (
         datetime.fromisoformat(marine["observed_at"]).replace(tzinfo=None)
         if marine is not None
@@ -897,8 +1057,13 @@ def station_dashboard(
                 "status": to_contract_source_status(
                     get_source_detail(row["tm"], reference_time)
                 )["status"],
-                "pm10_ug_m3": airkorea["pm10_ug_m3"] if airkorea else None,
-                "pm25_ug_m3": airkorea["pm25_ug_m3"] if airkorea else None,
+                "pm10_ug_m3": (
+                    display_airkorea["pm10_ug_m3"] if display_airkorea else None
+                ),
+                "pm25_ug_m3": (
+                    display_airkorea["pm25_ug_m3"] if display_airkorea else None
+                ),
+                "aqi": current_aqi,
             },
             "marine": marine,
             "source_status": [
@@ -930,7 +1095,7 @@ def station_dashboard(
                     if selected_forecast_timeline
                     else None
                 ),
-                "pm_display_grade": None,
+                "pm_display_grade": current_aqi["display_grade"],
                 "summary": get_diagnosis_summary(
                     mission_evaluation=mission_evaluation,
                     is_mock=is_mock,
