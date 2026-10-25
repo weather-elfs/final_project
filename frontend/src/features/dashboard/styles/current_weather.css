@@ -205,7 +205,7 @@
   right: 16px;
   left: 16px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.65fr) repeat(3, minmax(0, 1fr));
   column-gap: 0.75rem;
   height: 104px;
   padding: 10px 18px;
@@ -228,7 +228,7 @@
   align-items: center;
   gap: 0;
   min-height: 42px;
-  font-size: clamp(1.5rem, 2.2vw, 2rem);
+  font-size: clamp(1.25rem, 1.8vw, 1.75rem);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -264,10 +264,27 @@
 }
 
 .weather-glyph {
+  flex: 0 0 auto;
   color: #f97316;
   font-size: 34px;
   font-weight: 400;
   line-height: 1;
+}
+
+.weather-metrics article:first-child strong {
+  gap: 0.25rem;
+  font-size: clamp(1.25rem, 1.8vw, 1.75rem);
+}
+
+@media (max-width: 43.75rem) {
+  .weather-metrics article:first-child strong {
+    flex-wrap: wrap;
+    font-size: 1.125rem;
+  }
+
+  .weather-metrics .weather-glyph {
+    font-size: 1.5rem;
+  }
 }
 
 .wind-arrow {

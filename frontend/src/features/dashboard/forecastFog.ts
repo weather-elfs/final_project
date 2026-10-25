@@ -90,7 +90,7 @@ export function buildMockForecastFogFrames(
         validAt: point.validAt,
         layer: {
           ...currentLayer,
-          source: `${currentLayer.source} 목 예측`,
+          source: `${currentLayer.source} 분포 변화`,
           observedAt: point.validAt ?? currentLayer.observedAt,
           cells,
         },

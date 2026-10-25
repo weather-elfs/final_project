@@ -41,6 +41,15 @@
   background: var(--background);
 }
 
+.mission-form select {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 12px;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

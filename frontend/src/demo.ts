@@ -31,7 +31,7 @@ export function demoHistory({ historyType, missionType }: HistoryRequest = {}): 
       total: records.length,
       page: 1,
       page_size: 10,
-      meta: { request_id: 'req_demo_history', generated_at: '2026-09-18T09:05:00+09:00', mock: true },
+      meta: { request_id: 'req_demo_history', generated_at: '2026-10-30T14:30:00+09:00', mock: true },
     },
   };
 }

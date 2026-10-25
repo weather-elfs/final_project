@@ -68,7 +68,7 @@ test('예측 시점별 목 안개 프레임을 만들고 원본 격자는 변경
     frames.map(({ horizonH }) => horizonH),
     [3, 6, 9, 12],
   );
-  assert.equal(frames[0]?.layer.source, 'GK2A 목 예측');
+  assert.equal(frames[0]?.layer.source, 'GK2A 분포 변화');
   assert.equal(
     frames[0]?.layer.observedAt,
     '2026-09-18T12:00:00+09:00',

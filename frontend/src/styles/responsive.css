@@ -188,6 +188,9 @@
   }
   .impact-title {
     position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
     height: 55px;
     align-items: flex-end;
     padding: 0 16px 10px;

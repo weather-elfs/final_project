@@ -25,7 +25,7 @@ export const operationsHandlers = [
     return HttpResponse.json({
       code: 'SUCCESS',
       message: '운영 이력을 조회했습니다.',
-      data: { records, total: records.length, page: 1, page_size: 10, meta: { request_id: 'req_history_20260918', generated_at: '2026-09-18T09:05:00+09:00' } },
+      data: { records, total: records.length, page: 1, page_size: 10, meta: { request_id: 'req_history_20261030', generated_at: '2026-10-30T14:30:00+09:00' } },
     });
   }),
 ];
@@ -55,13 +55,13 @@ export const handlers = [
     await delay(300);
 
     if (!dashboardConfig.data.stations.some((station) => station.station_id === stationId && station.available)) {
-      return apiError('STATION_NOT_FOUND', '지원하지 않는 관측소입니다.', { station_id: stationId, meta: { request_id: 'req_20260918_000010' } }, 404);
+      return apiError('STATION_NOT_FOUND', '지원하지 않는 관측소입니다.', { station_id: stationId, meta: { request_id: 'req_20261030_000010' } }, 404);
     }
     if (!dashboardConfig.data.forecast_intervals_h.includes(forecastIntervalH)) {
-      return apiError('INVALID_PARAMETER', '예측 간격을 확인하세요.', { forecast_interval_h: forecastIntervalH, meta: { request_id: 'req_20260918_000011' } }, 422);
+      return apiError('INVALID_PARAMETER', '예측 간격을 확인하세요.', { forecast_interval_h: forecastIntervalH, meta: { request_id: 'req_20261030_000011' } }, 422);
     }
     if (!dashboardConfig.data.mission_types.some((mission) => mission.mission_type === missionType && mission.enabled)) {
-      return apiError('INVALID_PARAMETER', '지원하지 않는 임무 유형입니다.', { mission_type: missionType, meta: { request_id: 'req_20260918_000012' } }, 422);
+      return apiError('INVALID_PARAMETER', '지원하지 않는 임무 유형입니다.', { mission_type: missionType, meta: { request_id: 'req_20261030_000012' } }, 422);
     }
 
     const fixture = dashboardFixture(stationId, forecastIntervalH, mock);

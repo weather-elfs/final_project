@@ -30,6 +30,15 @@
   margin-top: 0.75rem;
 }
 
+.weather-ui .history-filter-card select {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 12px;
+}
+
 .weather-ui .history-table-card,
 .weather-ui .history-detail-card {
   min-height: 39.125rem;
@@ -37,6 +46,15 @@
 
 .weather-ui .history-table {
   min-width: 50rem;
+}
+
+.weather-ui .history-table-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-ui .history-table-card .workspace-table-scroll {
+  margin-bottom: 1rem;
 }
 
 .weather-ui .history-table th:nth-child(1) { width: 16.667%; }
@@ -70,7 +88,8 @@
   display: flex;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+  margin-top: auto;
+  padding-top: 0.75rem;
 }
 
 .weather-ui .pagination button {

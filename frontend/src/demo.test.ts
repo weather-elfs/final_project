@@ -26,10 +26,10 @@ test('시연 경보 데이터는 기존 화면 계약을 유지하며 매번 독
 });
 
 test('시연 이력은 유형·임무 필터와 빈 결과를 지원한다', () => {
-  assert.equal(toHistoryData(demoHistory().data).total, 4);
-  assert.equal(toHistoryData(demoHistory({ historyType: 'ALL', missionType: 'ALL' }).data).total, 4);
+  assert.equal(toHistoryData(demoHistory().data).total, 24);
+  assert.equal(toHistoryData(demoHistory({ historyType: 'ALL', missionType: 'ALL' }).data).total, 24);
   const incidents = toHistoryData(demoHistory({ historyType: 'INCIDENT', missionType: 'MARITIME_TRANSPORT' }).data);
-  assert.equal(incidents.total, 2);
+  assert.equal(incidents.total, 7);
   assert.ok(incidents.records.every((record) => record.type === 'INCIDENT'));
   assert.equal(toHistoryData(demoHistory({ missionType: 'AIR_OPERATION' }).data).total, 0);
 });

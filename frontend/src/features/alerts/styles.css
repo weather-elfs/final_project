@@ -11,6 +11,19 @@
   min-width: 43.75rem;
 }
 
+.weather-ui .alert-rules-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-ui .alert-rules-card .workspace-table-scroll {
+  margin-bottom: 1rem;
+}
+
+.weather-ui .alert-rules-card > .notice-card {
+  margin-top: auto;
+}
+
 .weather-ui .alert-rules-table th:nth-child(-n + 3) {
   width: 21%;
 }
