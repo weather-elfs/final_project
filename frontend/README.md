@@ -3,7 +3,7 @@
 - 기술 구성: React + TypeScript + Vite
 - 개발·Storybook 데이터: MSW 기반 백엔드 계약 모사
 - 배포 시연 데이터: `demo` 빌드에서만 로그인·경보·이력을 프론트 샘플로 처리하고, 기상 API는 실제 백엔드 사용
-- 도메인 판정: 현재 기상의 안개·PM 기반 추정 AQI는 관측값으로 프론트에서 계산하고, 종합 판정·임무 가능 여부는 API 결과 표시
+- 도메인 판정: 안개는 시정으로 계산하고 대기질은 서버 NowCast AQI를 우선 표시한다. 해당 계약이 없는 기존 응답만 PM 기반 추정 AQI를 사용하며, 종합 판정·임무 가능 여부는 API 결과를 표시한다.
 
 ## 실행
 
@@ -20,6 +20,25 @@ pnpm build-storybook
 ## API 기준
 
 - [BE–FE 연동 API 명세서 v0.4 (2026-09-30)](https://docs.google.com/document/d/1zjBbNEa1c2HuNsfqGURhRHMnJt8upEdP/edit?rtpof=true&tab=t.0)
+
+### 최신 관측 수집·예측 조회 (2026-10-25)
+
+실제 백엔드 모드의 일반 대시보드 조회는 ASOS·AirKorea·국립해양조사원 관측과
+기상청 단기예보·AirKorea PM2.5 예보를 수집하고, DB 적재 후 관측+예보 튜닝형으로 예측한다.
+이 요청만 최대 60초를 기다리며, 실패하면
+이전 관측·예측을 지우고 서버 오류를 표시한다. 다른 API의 제한 시간은 변경하지 않는다.
+
+`current.observed_at`은 ASOS 관측 시각, `source_status[].observed_at`은 출처별 관측 시각이다.
+`meta.collection.requested_at` / `collected_at`은 수집 요청·적재 완료 시각이며,
+`meta.collection.model_input_observed_at`으로 실제 모델 입력의 출처별 시각을 확인할 수 있다.
+최신 자료는 기관이 공개한 가장 최근 관측을 뜻하며, 요청한 초의 관측을 의미하지 않는다.
+`as_of` 과거 조회와 백엔드 `mock=true` 시연은 별도 동작이다.
+
+`meta.model.name = catboost_observation_forecast_tuned`는 전달된 최종 ZIP의 튜닝형을 뜻한다.
+`meta.forecasts[]`에는 각 예측 대상시각의 실제 예보 입력값, `kma_issued_at`,
+`airkorea_issued_at`이 포함된다. 예보는 관측 기준시각에 공개된 자료만 사용한다.
+`meta.model.missing_features`의 입력은 결측 그대로 처리되며, 예보 누락·매칭 실패를
+프론트 목 데이터나 과거 예측값으로 대체하지 않는다. 화면에는 기존 `forecast_timeline` 계약을 그대로 사용한다.
 
 ## Docker 배포용 시연 모드
 
@@ -63,10 +82,17 @@ Vite 개발 프록시는 배포 파일에 포함되지 않는다.
 
 ## PM 기반 추정 AQI 계산
 
-현재 기상 카드의 **시정 영향 요인 → 대기질**은 API의 `current.pm25_ug_m3`와
-`current.pm10_ug_m3`(단위: µg/m³)로 프론트에서 계산한다.
-어댑터를 거친 `pm25UgM3`, `pm10UgM3`를 사용하며, 서버의 `current.aqi`나
-`diagnosis.pm_display_grade`로 이 영역의 계산값을 대체하지 않는다.
+현재 기상 카드의 **시정 영향 요인 → 대기질**은 최신 백엔드의
+`current.aqi.basis = NOWCAST_CURRENT` 응답이 있으면 서버가 실제 12시간 관측으로 계산한
+`value`를 사용하고, 등급·색상은 프론트의 기획안 `AIR_QUALITY_CRITERIA`로 결정한다.
+서버의 `display_level`, `display_grade`로 기획안 등급을 덮어쓰지 않는다.
+`status = calculated`, 유한한 0 이상 정수일 때만 사용하며 500 초과도 위험 5단계로 표시한다.
+자료 부족·유효하지 않은 응답은 판단 대기로 표시한다. 이 경우 현재 PM 농도로
+대체 계산하지 않는다. 화면과 기준 안내에도 서버 NowCast 사용을 구분한다.
+
+아래 산식은 NowCast 계약이 없는 기존 응답·목 데이터에만 적용한다.
+API의 `current.pm25_ug_m3`, `current.pm10_ug_m3`(단위: µg/m³)를 어댑터에서 변환한
+`pm25UgM3`, `pm10UgM3`로 계산하며, `diagnosis.pm_display_grade`는 사용하지 않는다.
 
 - 구현: [gradeTones.ts](src/features/dashboard/gradeTones.ts)의 `airQualityByParticles`
 - 표시: [VisibilitySummary.tsx](src/features/dashboard/components/VisibilitySummary.tsx)
@@ -140,9 +166,19 @@ PM10 지수 = round((50 - 0) / (54 - 0) × (19 - 0) + 0) = 18
 - 관측값이 오래됐어도 그 값으로 계산되며, 데이터 신선도는 출처별 데이터 상태에서 별도로 표시한다.
 - 종합 추정 문구와 임무 판정은 이 계산으로 변경하지 않고 서버 응답을 유지한다.
 
-기준 확인일: 2026-10-20.
+기준 확인일: 2026-10-26.
 [EPA/AirNow AQI 기술 문서(2026년 5월), Equation 1·Table 6](https://document.airnow.gov/technical-assistance-document-for-the-reporting-of-daily-air-quailty.pdf),
 [EPA AQS 농도 구간표](https://aqs.epa.gov/aqsweb/documents/codetables/aqi_breakpoints.html).
+
+## 시각 표시와 결측 보완 원칙
+
+- 현재 시각: 브라우저 시계로 매초 갱신하며 API 실패와 무관하게 표시한다. PC 시각이 부정확하면 영향을 받는다.
+- 관측 시각·예측 기준 시각: 실제 `current.observed_at`을 사용한다. 현재 시계로 대체하지 않는다.
+- 갱신 시각: API 응답의 `meta.generated_at`이며 관측 시각과 구분한다.
+- 원본 관측은 덮어쓰지 않는다. 보완을 도입할 때는 방법·원본 시각·보완 여부를 별도로 전달한다.
+- 변수별 허용 공백과 현재 모델 오차 비교가 검증되기 전까지 실제 관측의 자동 보간은 활성화하지 않는다.
+- PM2.5 예보 등급을 평균·보간하거나 미발표 미래 예보를 관측으로 대체하지 않는다.
+- 위 실제 데이터 원칙은 별도 표시된 시연용 합성 데이터·지도 애니메이션 보간과 구분한다.
 
 ## 구조와 재사용 경계
 
