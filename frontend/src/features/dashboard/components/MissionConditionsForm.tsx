@@ -4,13 +4,14 @@ import type { DashboardConfig, MissionValue, MissionValueKey, MissionValues } fr
 interface MissionConditionsFormProps {
   config: DashboardConfig;
   values: MissionValues;
-  generatedAt?: string;
+  currentTime?: string;
+  forecastBaseTime?: string;
   loading: boolean;
   onChange: (key: MissionValueKey, value: MissionValue) => void;
   onSubmit: () => void;
 }
 
-export default function MissionConditionsForm({ config, values, generatedAt, loading, onChange, onSubmit }: MissionConditionsFormProps) {
+export default function MissionConditionsForm({ config, values, currentTime, forecastBaseTime, loading, onChange, onSubmit }: MissionConditionsFormProps) {
   const ready = Boolean(values.stationId && values.forecastIntervalH && values.missionType);
   const interval = values.forecastIntervalH;
   const horizons = interval ? [1, 2, 3, 4].map((slot) => slot * interval) : [];
@@ -41,13 +42,13 @@ export default function MissionConditionsForm({ config, values, generatedAt, loa
             </select>
           </label>
           <label htmlFor="current-time">현재 시각
-            <input id="current-time" value={`${formatKstTime(generatedAt)} KST`} readOnly />
+            <input id="current-time" value={`${formatKstTime(currentTime)} KST`} readOnly />
           </label>
         </div>
         <label htmlFor="forecast-preview">표시 시점
           <div id="forecast-preview" className="forecast-preview"><span>{horizons.length ? horizons.map((hour) => `+${hour}h`).join(' · ') : '예측 간격을 선택하면 표시됩니다.'}</span><b>{horizons.length ? '4개 시점' : '선택 전'}</b></div>
         </label>
-        <div className="mission-actions"><small>현재 시각을 기준으로 선택한 간격의 4개 시점을 비교합니다.</small><button type="submit" disabled={loading || !ready}>{loading ? '조회 중…' : '시간대별 예측 보기'}</button></div>
+        <div className="mission-actions"><small>예측 기준 시각 {formatKstTime(forecastBaseTime)} KST · 관측 기준으로 선택한 간격의 4개 시점을 비교합니다.</small><button type="submit" disabled={loading || !ready}>{loading ? '조회 중…' : '시간대별 예측 보기'}</button></div>
       </form>
     </section>
   );

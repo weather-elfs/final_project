@@ -16,32 +16,17 @@ import { buildForecastFogDemoFrames } from './forecastFog';
 import { isForecastAvailable } from './stationStatus';
 import type { DashboardViewProps } from './types';
 
-function useLiveReferenceTime(reference?: string) {
-  const [liveTime, setLiveTime] = useState<string>();
+function useCurrentTime() {
+  const [liveTime, setLiveTime] = useState(() => new Date().toISOString());
 
   useEffect(() => {
-    const referenceTime = reference ? Date.parse(reference) : Number.NaN;
-    if (!Number.isFinite(referenceTime)) {
-      setLiveTime(undefined);
-      return undefined;
-    }
-
-    const synchronizedAt = Date.now();
-    const update = () =>
-      setLiveTime(
-        new Date(referenceTime + Date.now() - synchronizedAt).toISOString(),
-      );
+    const update = () => setLiveTime(new Date().toISOString());
     update();
     const intervalId = window.setInterval(update, 1_000);
     return () => window.clearInterval(intervalId);
-  }, [reference]);
+  }, []);
 
-  return (
-    liveTime ??
-    (reference && Number.isFinite(Date.parse(reference))
-      ? reference
-      : undefined)
-  );
+  return liveTime;
 }
 
 function usePrefersReducedMotion() {
@@ -88,9 +73,7 @@ export default function DashboardView({
   const [forecastPlaying, setForecastPlaying] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
-  const liveReferenceTime = useLiveReferenceTime(
-    dashboard?.meta?.generatedAt ?? config.meta?.generatedAt,
-  );
+  const liveReferenceTime = useCurrentTime();
   const refreshImminent = isKstRefreshImminent(liveReferenceTime);
   const selectedStationId =
     values.stationId ||
@@ -383,7 +366,7 @@ export default function DashboardView({
                   {(mapMode === 'forecast' || Boolean(config.fogLayer?.cells.length)) && (
                     <span>
                       {mapMode === 'forecast'
-                        ? '안개 이동은 과거 GK2A 격자 기반 시연용 목 데이터이며 실제 안개 예측이 아닙니다.'
+                        ? '수집된 GK2A 관측 격자를 바탕으로 안개 분포 변화를 시각화합니다.'
                         : '지도 음영은 GK2A 탐지 격자를 평활화한 안개 분포 추정입니다.'}
                     </span>
                   )}
@@ -399,7 +382,8 @@ export default function DashboardView({
               <MissionConditionsForm
                 config={missionConfig}
                 values={values}
-                generatedAt={dashboard?.meta?.generatedAt}
+                currentTime={liveReferenceTime}
+                forecastBaseTime={dashboard?.current?.observedAt}
                 loading={loading}
                 onChange={onChange}
                 onSubmit={onSubmit}
