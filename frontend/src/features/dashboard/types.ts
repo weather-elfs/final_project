@@ -78,7 +78,7 @@ export interface CurrentConditions {
   windSpeedMS?: number | null;
   weatherLabel?: string;
   fogGradeLabel?: string;
-  aqi?: { value?: number | null; displayLevel?: number; displayGrade?: string; status?: string };
+  aqi?: { value?: number | null; displayLevel?: number | null; displayGrade?: string | null; status?: string; basis?: string; standard?: string };
   relativeHumidityPct?: number | null;
   temperatureDewpointSpreadC?: number | null;
 }

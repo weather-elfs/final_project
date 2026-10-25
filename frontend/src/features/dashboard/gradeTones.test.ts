@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { airQualityByParticles, aqiGradeTone, displayAqiGrade, fogGradeByVisibility, fogGradeTone, fogStageLabel } from './gradeTones';
+import { airQualityByAqi, airQualityByParticles, aqiGradeTone, displayAqiGrade, fogGradeByVisibility, fogGradeTone, fogStageLabel } from './gradeTones';
+
+test('서버 AQI 수치를 기획안 5단계로 표시하고 500 초과도 위험으로 유지한다', () => {
+  for (const [value, stage] of [[0, 1], [50, 1], [51, 1], [100, 1], [101, 2], [150, 2], [151, 3], [200, 3], [201, 4], [300, 4], [301, 5], [500, 5], [649, 5]]) {
+    assert.equal(airQualityByAqi(value).stage, stage);
+    assert.equal(airQualityByAqi(value).value, value);
+  }
+  for (const value of [null, undefined, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(airQualityByAqi(value).stage, null);
+  }
+});
 
 test('시정 거리를 6단계 표준 안개 명칭과 색상으로 변환한다', () => {
   assert.deepEqual(fogGradeByVisibility(7), { stage: 1, label: '옅은 안개', rangeLabel: '4–10 km 미만', tone: 'green' });

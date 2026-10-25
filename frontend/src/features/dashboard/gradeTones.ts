@@ -65,6 +65,14 @@ export const AIR_QUALITY_CRITERIA = [
   { stage: 5, maxValue: Infinity, label: '위험', range: 'AQI 301 이상', tone: 'maroon' },
 ] as const;
 
+export function airQualityByAqi(value?: number | null): AirQualityPresentation {
+  if (value == null || !Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    return { value: null, stage: null, label: '판단 대기', tone: 'neutral' };
+  }
+  const grade = AIR_QUALITY_CRITERIA.find((item) => value <= item.maxValue)!;
+  return { value, stage: grade.stage, label: grade.label, tone: grade.tone };
+}
+
 type ParticleBreakpoint = readonly [concentrationLow: number, concentrationHigh: number, indexLow: number, indexHigh: number];
 
 // EPA / AirNow, May 2026, Table 6 and Equation 1:
@@ -106,9 +114,7 @@ export function airQualityByParticles(pm25UgM3?: number | null, pm10UgM3?: numbe
   const pm25Index = particleIndex(pm25UgM3, 10, PM25_BREAKPOINTS);
   const pm10Index = particleIndex(pm10UgM3, 1, PM10_BREAKPOINTS);
   if (pm25Index == null || pm10Index == null) {
-    return { value: null, stage: null, label: '판단 대기', tone: 'neutral' };
+    return airQualityByAqi(null);
   }
-  const value = Math.max(pm25Index, pm10Index);
-  const grade = AIR_QUALITY_CRITERIA.find((item) => value <= item.maxValue)!;
-  return { value, stage: grade.stage, label: grade.label, tone: grade.tone };
+  return airQualityByAqi(Math.max(pm25Index, pm10Index));
 }

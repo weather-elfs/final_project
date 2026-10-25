@@ -105,6 +105,7 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
       const response = await getDashboard(request);
       setDashboard(toDashboardData(response.data));
     } catch (requestError) {
+      setDashboard(null);
       setError(errorMessage(requestError));
     } finally {
       setLoading(false);

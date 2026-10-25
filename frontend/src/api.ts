@@ -140,7 +140,12 @@ export function getDashboardConfig(bounds: MapBounds, options?: RequestInit) {
 }
 
 export function getDashboard(params: DashboardRequest, options?: RequestInit) {
-  return request<unknown>(buildDashboardUrl(params), options);
+  const timeout = AbortSignal.timeout(60_000);
+  return request<unknown>(buildDashboardUrl(params), {
+    ...options,
+    cache: 'no-store',
+    signal: options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+  });
 }
 
 export async function getAlertOperations(options?: RequestInit) {

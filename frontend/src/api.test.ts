@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ApiError, buildDashboardConfigUrl, buildDashboardUrl, buildHistoryUrl, request } from './api';
+import { ApiError, buildDashboardConfigUrl, buildDashboardUrl, buildHistoryUrl, getDashboard, request } from './api';
 
 test('대시보드 설정 URL에 지도 경계 좌표를 포함한다', () => {
   const url = new URL(buildDashboardConfigUrl({
@@ -93,5 +93,30 @@ test('FastAPI detail 오류 메시지를 보존한다', async (t) => {
     assert.equal(error.status, 422);
     assert.equal(error.message, '지도 경계 좌표가 필요합니다.');
     return true;
+  });
+});
+
+test('최신 자료 수집 요청도 호출자의 취소 신호를 유지한다', async (t) => {
+  const controller = new AbortController();
+  let signal: AbortSignal | undefined;
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    assert.equal(options.cache, 'no-store');
+    signal = options.signal ?? undefined;
+    return Response.json({ code: 'SUCCESS', data: {} });
+  });
+  await getDashboard({ stationId: '112', forecastIntervalH: 3, missionType: 'MARITIME_TRANSPORT' }, { signal: controller.signal });
+  assert.ok(signal);
+  assert.equal(signal.aborted, false);
+  controller.abort();
+  assert.equal(signal.aborted, true);
+});
+
+test('최신 수집 실패는 정상 응답이나 과거 예측으로 대체하지 않는다', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    code: 'LATEST_DATA_UNAVAILABLE', message: '최신 자료 수집 실패',
+    data: { source: 'ASOS', meta: { request_id: 'req-live-failed' } },
+  }, { status: 503 }));
+  await assert.rejects(getDashboard({ stationId: '112', forecastIntervalH: 3, missionType: 'MARITIME_TRANSPORT' }), {
+    code: 'LATEST_DATA_UNAVAILABLE', status: 503, requestId: 'req-live-failed',
   });
 });

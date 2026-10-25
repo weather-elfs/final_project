@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { AIR_QUALITY_CRITERIA, airQualityByParticles, fogGradeByVisibility, fogStageLabel } from '../gradeTones';
+import { AIR_QUALITY_CRITERIA, airQualityByAqi, airQualityByParticles, fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData, SourceStatusDetail } from '../types';
 
@@ -17,7 +17,7 @@ const FOG_CRITERIA = [
 const SOURCE_LABELS: Record<string, string> = {
   ASOS: '기상청 ASOS',
   AIRKOREA: '에어코리아',
-  TIDE_OBSERVATORY: '해양부이',
+  TIDE_OBSERVATORY: '국립해양조사원',
   MARINE: '해양부이',
   PM1: '산림청 PM1',
   FOREST: '산림청 PM1',
@@ -77,10 +77,14 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
   const lastRefreshAt = dashboard?.meta?.generatedAt ?? current?.observedAt;
   const errors = dashboard?.apiStatus?.summary?.fail ?? 0;
   const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
-  const statusLabel = errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
-  const statusTone = errors ? 'error' : delayed ? 'delayed' : 'good';
+  const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
+  const statusTone = !dashboard ? 'delayed' : errors ? 'error' : delayed ? 'delayed' : 'good';
   const fogGrade = fogGradeByVisibility(current?.visibilityKm);
-  const airQuality = airQualityByParticles(current?.pm25UgM3, current?.pm10UgM3);
+  const serverAqi = current?.aqi;
+  const usesNowcast = serverAqi?.basis === 'NOWCAST_CURRENT';
+  const airQuality = usesNowcast
+    ? airQualityByAqi(serverAqi.status === 'calculated' ? serverAqi.value : null)
+    : airQualityByParticles(current?.pm25UgM3, current?.pm10UgM3);
   const fogDetail = fogGrade.rangeLabel === '자료 없음' ? fogGrade.label : `${fogGrade.label} · ${fogGrade.rangeLabel}`;
   const sourceStatuses = [...(dashboard?.sourceStatus ?? [])].sort((left, right) => {
     const leftOrder = SOURCE_ORDER.indexOf(left.source.toUpperCase());
@@ -238,7 +242,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
             <section className="stage-criteria-section" aria-labelledby="air-quality-criteria-title">
               <div className="stage-criteria-section-title">
                 <h5 id="air-quality-criteria-title">대기질 단계 · 5등급</h5>
-                <span>PM 기반 AQI 추정 · 색각 보조</span>
+                <span>{usesNowcast ? '서버 NowCast AQI · 색각 보조' : 'PM 기반 AQI 추정 · 색각 보조'}</span>
               </div>
               <div className="stage-criteria-items air-quality-criteria-items">
                 {AIR_QUALITY_CRITERIA.map((item) => (
@@ -251,14 +255,20 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
             </section>
 
             <p className="stage-criteria-note">안개는 시정 기반 프로젝트 UI 분류이며, 10 km 이상은 안개 없음으로 표시합니다.</p>
-            <p className="stage-criteria-note">대기질은 PM2.5·PM10을 각각 환산한 지수 중 높은 값입니다. 두 값이 모두 있어야 계산하며, 하나라도 누락되면 판단 대기입니다.</p>
-            <p className="stage-criteria-note">단일 관측값 기반 추정으로, 24시간 평균·NowCast 및 다른 오염물질을 반영한 공식 AQI가 아닙니다. <a href="https://document.airnow.gov/technical-assistance-document-for-the-reporting-of-daily-air-quailty.pdf" target="_blank" rel="noreferrer">EPA/AirNow 산식·농도 구간(2026)</a>을 사용하며 0–100은 프로젝트 기준 양호 1단계로 묶습니다.</p>
+            {usesNowcast ? (
+              <p className="stage-criteria-note">백엔드가 PM2.5·PM10의 최근 시간별 자료로 계산한 NowCast AQI 수치를 사용하고, 등급·색상은 기획안의 5단계를 적용합니다. 자료 부족·유효하지 않은 응답은 판단 대기로 표시하며, 현재 PM 농도로 다시 계산하지 않습니다. 0–100은 양호 1단계, 300 초과는 위험 5단계입니다.</p>
+            ) : (
+              <>
+                <p className="stage-criteria-note">대기질은 PM2.5·PM10을 각각 환산한 지수 중 높은 값입니다. 두 값이 모두 있어야 계산하며, 하나라도 누락되면 판단 대기입니다.</p>
+                <p className="stage-criteria-note">단일 관측값 기반 추정으로, 24시간 평균·NowCast 및 다른 오염물질을 반영한 공식 AQI가 아닙니다. <a href="https://document.airnow.gov/technical-assistance-document-for-the-reporting-of-daily-air-quailty.pdf" target="_blank" rel="noreferrer">EPA/AirNow 산식·농도 구간(2026)</a>을 사용하며 0–100은 프로젝트 기준 양호 1단계로 묶습니다.</p>
+              </>
+            )}
           </div>
         )}
       </div>
       <div className="impact-grid">
         <article><div><strong>안개</strong><span>{fogDetail}</span></div><b className={`factor-stage grade-tone-${fogGrade.tone}`}>{fogStageLabel(current?.visibilityKm)}</b></article>
-        <article><div><strong>대기질</strong><span>추정 AQI {airQuality.value ?? '—'} · {airQuality.label}</span></div><b className={`factor-stage grade-tone-${airQuality.tone}`}>{airQuality.stage ?? '—'}/5단계</b></article>
+        <article><div><strong>대기질</strong><span>{usesNowcast ? 'AQI (NowCast)' : '추정 AQI'} {airQuality.value ?? '—'} · {airQuality.label}</span></div><b className={`factor-stage grade-tone-${airQuality.tone}`}>{airQuality.stage ?? '—'}/5단계</b></article>
       </div>
       <p className="diagnosis-summary">종합 추정: {diagnosis?.summary ?? '데이터 대기'}</p>
 
