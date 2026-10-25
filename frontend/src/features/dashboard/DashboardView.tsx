@@ -120,8 +120,8 @@ export default function DashboardView({
       : `+${forecastMapPoint.horizonH}시간 예측`;
   const mapReferenceTime =
     mapMode === 'current'
-      ? (dashboard?.current?.observedAt ?? config.meta?.generatedAt)
-      : (forecastMapPoint?.validAt ?? config.meta?.generatedAt);
+      ? dashboard?.current?.observedAt
+      : forecastMapPoint?.validAt;
   const mapPoints = config.stations.map((station) => {
     const hasSelectedDashboard = dashboard?.station?.stationId === station.id;
     return {

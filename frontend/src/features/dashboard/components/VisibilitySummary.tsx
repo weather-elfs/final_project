@@ -74,7 +74,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
   const statusRootRef = useRef<HTMLDivElement>(null);
   const current = dashboard?.current;
   const diagnosis = dashboard?.diagnosis;
-  const lastRefreshAt = dashboard?.meta?.generatedAt ?? current?.observedAt;
+  const lastRefreshAt = dashboard?.meta?.generatedAt;
   const errors = dashboard?.apiStatus?.summary?.fail ?? 0;
   const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
   const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';

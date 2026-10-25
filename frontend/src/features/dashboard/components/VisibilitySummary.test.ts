@@ -11,6 +11,17 @@ function renderSummary(dashboard: DashboardData) {
   return renderToStaticMarkup(createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }));
 }
 
+test('갱신 시각은 API 응답 생성 시각을 쓰고 관측 시각으로 대체하지 않는다', () => {
+  const current = { observedAt: '2026-10-26T01:00:00+09:00' };
+  const missingRefresh = renderSummary({ current });
+  assert.match(missingRefresh, /갱신 시각 --:--:-- KST/);
+  assert.doesNotMatch(missingRefresh, /갱신 시각 01:00:00 KST/);
+
+  const withRefresh = renderSummary({ current, meta: { generatedAt: '2026-10-26T01:30:45+09:00' } });
+  assert.match(withRefresh, /갱신 시각 01:30:45 KST/);
+  assert.doesNotMatch(withRefresh, /갱신 시각 01:00:00 KST/);
+});
+
 test('최신 조회 실패로 자료가 없어지면 데이터 상태를 정상으로 표시하지 않는다', () => {
   const markup = renderToStaticMarkup(createElement(VisibilitySummary, { dashboard: null, loading: false, onRefresh: () => {} }));
   assert.match(markup, /데이터 상태 · 자료 없음/);
