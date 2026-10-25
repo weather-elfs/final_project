@@ -1,4 +1,5 @@
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+import math
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 BREAKPOINTS = {
     "pm25": [
@@ -20,25 +21,36 @@ BREAKPOINTS = {
 }
 
 
+def _concentration(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
+
+
 def nowcast(values):
     # 최신 시간부터 과거 12시간 순서
     values = list(values)[:12]
     values += [None] * (12 - len(values))
-    values = [float(v) if v is not None and float(v) >= 0 else None for v in values]
+    values = [_concentration(v) for v in values]
 
     if sum(v is not None for v in values[:3]) < 2:
         return None
 
     valid = [v for v in values if v is not None]
     maximum = max(valid)
+    if min(valid) == maximum:
+        return maximum
     weight = max(0.5, min(valid) / maximum) if maximum > 0 else 1.0
 
-    numerator = sum(v * weight**i for i, v in enumerate(values) if v is not None)
-    denominator = sum(weight**i for i, v in enumerate(values) if v is not None)
+    numerator = math.fsum(v * weight**i for i, v in enumerate(values) if v is not None)
+    denominator = math.fsum(weight**i for i, v in enumerate(values) if v is not None)
     return numerator / denominator
 
 
 def pm_to_aqi(concentration, pollutant):
+    concentration = _concentration(concentration)
     if concentration is None:
         return None
 
@@ -47,15 +59,18 @@ def pm_to_aqi(concentration, pollutant):
         Decimal(precision), rounding=ROUND_DOWN
     )
 
+    # EPA May 2026: AQI > 500 keeps the final interval's slope, not a 500 cap.
+    # https://document.airnow.gov/technical-assistance-document-for-the-reporting-of-daily-air-quailty.pdf
     for low, high, aqi_low, aqi_high in BREAKPOINTS[pollutant]:
-        if Decimal(str(low)) <= value <= Decimal(str(high)):
+        if Decimal(str(low)) <= value <= Decimal(str(high)) or (
+            high == BREAKPOINTS[pollutant][-1][1] and value > Decimal(str(high))
+        ):
             index = (Decimal(aqi_high) - Decimal(aqi_low)) / (
                 Decimal(str(high)) - Decimal(str(low))
             ) * (value - Decimal(str(low))) + Decimal(aqi_low)
             return int(index.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
-    # 현재 구현은 AQI 500을 상한으로 사용
-    return 500 if value > Decimal(str(BREAKPOINTS[pollutant][-1][1])) else None
+    return None
 
 
 def calculate_current_aqi(pm25_hourly, pm10_hourly):
