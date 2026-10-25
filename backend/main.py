@@ -1,12 +1,20 @@
-from fastapi import FastAPI
+import math
 import uuid
-from fastapi.responses import JSONResponse
 from datetime import timedelta
-from backend.model_predict import predict_visibility_pm
-from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
-from fastapi.middleware.cors import CORSMiddleware
+
 from backend.aqi import calculate_current_aqi
-from backend.airkorea_live import read_live_airkorea
+from backend.forecast_inputs import ForecastError, read_forecasts
+from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
+from backend.live_observations import CollectionError, refresh_observations
+from backend.model_predict import (
+    METADATA_PATH,
+    MODEL_PATHS,
+    predict_visibility_pm,
+    read_model_history,
+)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
 
@@ -40,7 +48,7 @@ def health():
     return {"status": "OK"}
 
 
-from fastapi import Query, HTTPException
+from fastapi import HTTPException, Query
 
 STATIONS = [
     {
@@ -153,7 +161,12 @@ def dashboard_config(
                         **station,
                         "available": True,
                         "current_status": current_status,
-                        "forecast_status": "FAIL",
+                        "forecast_status": (
+                            "SUCCESS"
+                            if all(path.is_file() for path in MODEL_PATHS.values())
+                            and METADATA_PATH.is_file()
+                            else "FAIL"
+                        ),
                     }
                 )
 
@@ -182,6 +195,7 @@ def dashboard_config(
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+
 from backend.database import get_connection
 
 KST = timezone(timedelta(hours=9))
@@ -359,11 +373,6 @@ AIR_STATION_MAP = {
 
 
 def get_station_aqi(conn, station_id, observed_at):
-    import csv
-    import math
-    from pathlib import Path
-    from datetime import datetime, timedelta
-
     empty = calculate_current_aqi([], [])
 
     if observed_at is None:
@@ -381,49 +390,7 @@ def get_station_aqi(conn, station_id, observed_at):
 
     anchor = observed_at.replace(tzinfo=None, minute=0, second=0, microsecond=0)
 
-    root = Path(__file__).resolve().parents[1]
-
-    csv_files = [
-        root / "src/collectors/api/data/raw/airkorea/airkorea_realtime_3stations.csv",
-        root / "data/raw/airkorea/airkorea_realtime_3stations.csv",
-    ]
-
-    csv_files = sorted(
-        [p for p in csv_files if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-    )
-
-    hourly = {}
-
-    def numeric(value):
-        try:
-            number = float(value)
-            return number if math.isfinite(number) and number >= 0 else None
-        except (TypeError, ValueError):
-            return None
-
-    for path in csv_files:
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            for record in csv.DictReader(f):
-                if str(record.get("측정소코드", "")).strip() != code:
-                    continue
-
-                try:
-                    tm = datetime.fromisoformat(record["날짜"])
-                    tm = tm.replace(tzinfo=None)
-                except (ValueError, TypeError, KeyError):
-                    continue
-
-                if tm.minute != 0 or tm.second != 0:
-                    continue
-
-                if anchor - timedelta(hours=11) <= tm <= anchor:
-                    hourly[tm] = (
-                        numeric(record.get("PM2.5")),
-                        numeric(record.get("PM10")),
-                    )
-
-    # 과거 DB 데이터도 조회해 CSV 누락 시 사용
+    # 현재 표시·모델·AQI가 같은 DB 스냅샷을 사용한다. CSV로 덮어쓰지 않는다.
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -446,22 +413,18 @@ def get_station_aqi(conn, station_id, observed_at):
     pm25 = []
     pm10 = []
 
-    for index, row in enumerate(db_rows):
-        tm = anchor - timedelta(hours=index)
-        live25, live10 = hourly.get(tm, (None, None))
-
+    for row in db_rows:
         db25 = row["pm25"] if isinstance(row, dict) else row[0]
         db10 = row["pm10"] if isinstance(row, dict) else row[1]
-
-        pm25.append(live25 if live25 is not None else db25)
-        pm10.append(live10 if live10 is not None else db10)
+        pm25.append(db25)
+        pm10.append(db10)
 
     return calculate_current_aqi(pm25, pm10)
 
 
 # 예측 시정거리 기준 안개등급 분류
 def get_fog_grade_label(visibility_km: float) -> str:
-    if visibility_km > 10:
+    if visibility_km >= 10:
         return "안개 없음"
     elif visibility_km >= 2:
         return "옅은 안개"
@@ -586,7 +549,6 @@ def get_diagnosis_summary(
 @app.get(
     "/api/v1/stations/{station_id}/dashboard",
     summary="선택 관측소 대시보드 조회",
-    description="관측 데이터, 예측 시정거리, 임무 판정 결과를 조회합니다.",
     responses={
         200: {
             "description": "대시보드 조회 성공 또는 일부 기능 준비 중",
@@ -671,7 +633,7 @@ def get_diagnosis_summary(
             },
         },
         503: {
-            "description": "DB 데이터 조회 실패",
+            "description": "최신 수집·적재 실패(LATEST_DATA_UNAVAILABLE), 예보 입력 실패(FORECAST_INPUT_UNAVAILABLE), 예측 실패(FORECAST_FAILED), DB 조회 실패(DB_ERROR)",
             "content": {
                 "application/json": {
                     "example": {
@@ -703,6 +665,13 @@ def station_dashboard(
         description="프론트엔드 연동 테스트용 Mock 예측 데이터 사용 여부",
     ),
 ):
+    """일반 조회는 최신 관측·기상청 단기예보·AirKorea PM2.5 예보 수집 → DB 적재 → 관측+예보 튜닝형 예측 순서로 처리합니다.
+
+    기관별 공개 주기가 달라 관측 시각은 요청 시각과 다를 수 있습니다.
+    실제 입력 시각은 data.meta.collection.model_input_observed_at에 포함됩니다.
+    예보 입력·발표시각은 data.meta.forecasts, 모델·결측 입력 정보는 data.meta.model에 포함됩니다.
+    as_of 과거 조회와 인천 mock=true 시연은 최신 수집을 수행하지 않습니다.
+    """
     if station_id not in ("102", "112", "201"):
         return JSONResponse(
             status_code=404,
@@ -744,6 +713,29 @@ def station_dashboard(
             },
         )
 
+    collection = None
+    horizons = [forecast_interval_h * i for i in range(1, 5)]
+    if as_of is None and not (mock and station_id == "112"):
+        try:
+            collection = refresh_observations(station_id, horizons=horizons)
+        except CollectionError as exc:
+            print(
+                f"최신 수집 실패: {exc.source} / {exc.reason} / {type(exc.__cause__).__name__}",
+                flush=True,
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "code": "LATEST_DATA_UNAVAILABLE",
+                    "message": "최신 관측자료 수집·적재에 실패해 예측을 실행하지 않았습니다.",
+                    "data": {
+                        "source": exc.source,
+                        "reason": exc.reason,
+                        "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                    },
+                },
+            )
+
     # 조회 모드에 따라 ASOS 테이블 선택
     # 날짜 미지정: 실시간 테이블
     # 날짜 지정: 과거 데이터 테이블
@@ -776,9 +768,16 @@ def station_dashboard(
 
     try:
         # 과거 관측 시각을 지정한 경우 해당 시각으로 조회
-        query_time = as_of.replace(tzinfo=None) if as_of is not None else None
+        query_time = (
+            as_of.astimezone(KST).replace(tzinfo=None)
+            if as_of is not None and as_of.tzinfo is not None
+            else as_of
+        )
+        if collection is not None:
+            query_time = collection["base_time"]
 
         with get_connection() as conn:
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             # ASOS 관측 데이터 조회
             with conn.cursor() as cur:
                 cur.execute(sql, (station_id, query_time, query_time))
@@ -809,6 +808,32 @@ def station_dashboard(
                 if row is not None
                 else None
             )
+            forecast_inputs, model_history = {}, []
+            if row is not None and not (mock and station_id == "112"):
+                forecast_inputs = read_forecasts(conn, station_id, row["tm"], horizons)
+                model_history = read_model_history(
+                    conn, station_id, row["tm"], asos_table
+                )
+                expected = collection.get("forecast_provenance") if collection else None
+                if expected and any(
+                    forecast_inputs[h][key] != expected[h][key]
+                    for h in horizons
+                    for key in ("kma_issued_at", "airkorea_issued_at")
+                ):
+                    raise ForecastError("FORECAST", "DB_INPUT_MISMATCH")
+    except ForecastError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": "FORECAST_INPUT_UNAVAILABLE",
+                "message": "요청 시점에 맞는 예보 입력이 없어 예측을 실행하지 않았습니다.",
+                "data": {
+                    "source": exc.source,
+                    "reason": exc.reason,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
     except Exception as e:
         print("DB 조회 오류:", repr(e))
         return JSONResponse(
@@ -835,14 +860,9 @@ def station_dashboard(
 
     # 상태 판정 기준 시각
     reference_time = (
-        as_of.replace(tzinfo=None)
-        if as_of is not None
-        else datetime.now(KST).replace(tzinfo=None)
+        query_time if as_of is not None else datetime.now(KST).replace(tzinfo=None)
     )
-    # 현재 조회는 실시간 CSV를 화면 표시용으로 사용
-    live_air = read_live_airkorea(station_id, reference_time) if as_of is None else None
-
-    display_airkorea = live_air["current"] if live_air is not None else airkorea
+    display_airkorea = airkorea
 
     # ASOS 상태
     asos_status = get_data_status(row["tm"], reference_time)
@@ -867,18 +887,6 @@ def station_dashboard(
     if aqi_age_hours is None or aqi_age_hours < 0 or aqi_age_hours > AQI_MAX_AGE_HOURS:
         current_aqi = calculate_current_aqi([], [])
 
-    # 실시간 AirKorea CSV 기반 AQI 계산
-    if (
-        as_of is None
-        and live_air is not None
-        and aqi_age_hours is not None
-        and 0 <= aqi_age_hours <= AQI_MAX_AGE_HOURS
-    ):
-        current_aqi = calculate_current_aqi(
-            live_air["pm25_history"],
-            live_air["pm10_history"],
-        )
-
     # 해양 데이터 상태
 
     marine_time = (
@@ -888,6 +896,24 @@ def station_dashboard(
     )
 
     marine_status = get_data_status(marine_time, reference_time)
+
+    if collection is not None:
+        actual_times = {
+            "ASOS": row["tm"].replace(tzinfo=KST).isoformat(),
+            "AIRKOREA": airkorea["observed_at"] if airkorea else None,
+            "TIDE_OBSERVATORY": marine["observed_at"] if marine else None,
+        }
+        if actual_times != collection["model_input_observed_at"] or any(
+            status != "OK" for status in (asos_status, airkorea_status, marine_status)
+        ):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "code": "LATEST_DATA_UNAVAILABLE",
+                    "message": "적재한 최신 자료와 모델 입력이 일치하지 않아 예측을 중단했습니다.",
+                    "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
+                },
+            )
 
     # 시정거리 변환
     visibility_km = row["visibility"] / 100 if row["visibility"] is not None else None
@@ -929,6 +955,7 @@ def station_dashboard(
 
     # CatBoost 시간대별 예측 (4개 시점)
     real_forecast_timeline = []
+    missing_features = set()
 
     if not is_mock and airkorea is not None and marine is not None:
         for h in range(
@@ -945,7 +972,15 @@ def station_dashboard(
                     asos=row,
                     airkorea=airkorea,
                     marine=marine,
+                    history=model_history,
+                    forecast=forecast_inputs[h],
                 )
+                missing_features.update(prediction.get("missing_features", []))
+                if not all(
+                    math.isfinite(prediction[key])
+                    for key in ("visibility_km", "pm25", "pm10")
+                ):
+                    raise ValueError("모델이 유효하지 않은 예측값을 반환했습니다.")
 
                 predicted_visibility = max(
                     0.0,
@@ -985,6 +1020,16 @@ def station_dashboard(
     selected_forecast_timeline = (
         mock_forecast_timeline if is_mock else real_forecast_timeline
     )
+
+    if collection is not None and len(real_forecast_timeline) != 4:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": "FORECAST_FAILED",
+                "message": "최신 관측자료는 적재했으나 예측 결과를 생성하지 못했습니다.",
+                "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
+            },
+        )
 
     forecast_summary = get_forecast_summary(selected_forecast_timeline)
 
@@ -1106,6 +1151,29 @@ def station_dashboard(
                 "generated_at": datetime.now(KST).isoformat(),
                 "partial": True,
                 "mock": is_mock,
+                "model": (
+                    None
+                    if is_mock
+                    else {
+                        "name": "catboost_observation_forecast_tuned",
+                        "transform": "expm1(log1p(current) + predicted_residual * sigma[h])",
+                        "missing_features": sorted(missing_features),
+                    }
+                ),
+                "forecasts": (
+                    [dict(horizon_h=h, **forecast_inputs[h]) for h in horizons]
+                    if not is_mock
+                    else []
+                ),
+                "collection": (
+                    {
+                        key: value
+                        for key, value in collection.items()
+                        if key != "base_time"
+                    }
+                    if collection is not None
+                    else None
+                ),
             },
         },
     }
