@@ -8,7 +8,7 @@
     "dev:backend": "vite --host 127.0.0.1 --mode backend",
     "build": "vite build --mode demo",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "tsx --test src/api.test.ts src/demo.test.ts src/mocks/fixtures.test.ts src/features/alerts/alertAdapter.test.ts src/features/dashboard/dashboardAdapter.test.ts src/features/dashboard/components/VisibilitySummary.test.ts src/features/dashboard/components/MissionConditionsForm.test.ts src/features/dashboard/fogDistribution.test.ts src/features/dashboard/forecastFog.test.ts src/features/dashboard/formatters.test.ts src/features/dashboard/gradeTones.test.ts src/features/history/historyAdapter.test.ts",
+    "test": "tsx --test src/api.test.ts src/demo.test.ts src/mocks/fixtures.test.ts src/features/alerts/alertAdapter.test.ts src/features/dashboard/dashboardAdapter.test.ts src/features/dashboard/components/VisibilitySummary.test.ts src/features/dashboard/components/MissionConditionsForm.test.ts src/features/dashboard/components/ForecastPanel.test.ts src/features/dashboard/fogDistribution.test.ts src/features/dashboard/forecastFog.test.ts src/features/dashboard/formatters.test.ts src/features/dashboard/gradeTones.test.ts src/features/history/historyAdapter.test.ts",
     "typecheck": "tsc --noEmit",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build"

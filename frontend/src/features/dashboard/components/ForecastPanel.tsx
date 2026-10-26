@@ -1,4 +1,4 @@
-import { fogGradeByVisibility } from '../gradeTones';
+import { fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
 
@@ -22,7 +22,7 @@ export default function ForecastPanel({ dashboard, requested, loading, available
   const forecastTime = (value?: string) => formatKstTime(value).slice(0, 5);
   const stageAndLabel = (visibilityKm?: number | null) => {
     const grade = fogGradeByVisibility(visibilityKm);
-    return `${grade.stage ? `${grade.stage}/6단계` : '—/6단계'} ${grade.label}`;
+    return grade.label === '안개 없음' ? grade.label : `${fogStageLabel(visibilityKm)} ${grade.label}`;
   };
 
   return (
@@ -56,7 +56,10 @@ export default function ForecastPanel({ dashboard, requested, loading, available
                 <tr className="forecast-visibility-row"><th scope="row">시정</th>{forecast.map((point) => <td key={`visibility-${point.horizonH}-${point.validAt}`}>{metric(point.visibilityPredKm, 'km', 1)}</td>)}</tr>
                 <tr><th scope="row">안개 단계</th>{forecast.map((point) => {
                   const grade = fogGradeByVisibility(point.visibilityPredKm);
-                  return <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}><span>{grade.stage ? `${grade.stage}/6단계` : '—/6단계'}</span><span>{point.fogGradeLabel ?? grade.label}</span></td>;
+                  return <td className="forecast-cell-lines" key={`fog-${point.horizonH}-${point.validAt}`}>
+                    {grade.label !== '안개 없음' && <span>{fogStageLabel(point.visibilityPredKm)}</span>}
+                    <span>{grade.label === '안개 없음' ? grade.label : point.fogGradeLabel ?? grade.label}</span>
+                  </td>;
                 })}</tr>
                 <tr><th scope="row">PM2.5</th>{forecast.map((point) => <td key={`pm25-${point.horizonH}-${point.validAt}`}>{metric(point.pm25PredUgM3, '㎍/m³', 1)}</td>)}</tr>
                 <tr><th scope="row">PM10</th>{forecast.map((point) => <td key={`pm10-${point.horizonH}-${point.validAt}`}>{metric(point.pm10PredUgM3, '㎍/m³', 1)}</td>)}</tr>
