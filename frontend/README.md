@@ -45,6 +45,14 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 
 
 ### 최신 관측 수집·예측 조회 (2026-10-25)
 
+브랜치 동기화 확인일: 2026-10-26. `feature/frontend`에는 백엔드 PR #6이 병합된
+`develop`의 `0da333f`를 반영했다. 이 기준의 백엔드 소스와, 이후 수정한 실시간 수집
+백엔드는 구분한다. **실시간 관측·예보 수집과 튜닝 모델을 사용하는 백엔드 브랜치는
+`feature/backend`**이며, `489c470`(수집·적재·모델 연동), `a189222`(NowCast AQI 보정)를 포함한다.
+프론트는 `pnpm dev:backend --port 5174`로 실행하고, 실시간 기능 검증 시에는
+`feature/backend` 소스에서 실행한 8000 포트 서버에 연결한다. 브랜치 이름을 바꿔도
+실행 중인 서버의 소스 폴더·프로세스가 자동으로 전환되는 것은 아니다.
+
 실제 백엔드 모드의 일반 대시보드 조회는 ASOS·AirKorea·국립해양조사원 관측과
 기상청 단기예보·AirKorea PM2.5 예보를 수집하고, DB 적재 후 관측+예보 튜닝형으로 예측한다.
 이 요청만 최대 60초를 기다리며, 실패하면
