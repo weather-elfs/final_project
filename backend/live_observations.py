@@ -1,8 +1,10 @@
-"""조회마다 최신 관측을 수집·검증하고 기존 DB에 한 트랜잭션으로 적재한다."""
+"""조회마다 최신 관측·시계열·예보를 수집하고 메모리에서 모델 입력을 맞춘다."""
 
 import json
+import logging
 import math
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -12,13 +14,9 @@ from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from backend.database import get_connection
-from backend.forecast_inputs import ForecastError, collect_forecasts, store_forecasts
-from backend.ingest_asos import insert_records, prepare_records, validate_csv
+from backend.forecast_inputs import ForecastError, collect_forecasts
+from backend.ingest_asos import prepare_records, validate_csv
 
-from backend_airkorea_test.ingest_airkorea import (
-    apply_records,
-)
 from backend_airkorea_test.ingest_airkorea import prepare_records as prepare_air_records
 from src.collectors.api import airkorea_collector, asos_collector
 
@@ -95,7 +93,8 @@ def collect_airkorea(station_id, now):
         path = Path(temp) / "airkorea.csv"
         pd.DataFrame(rows, columns=airkorea_collector.COLUMNS).to_csv(path, index=False)
         records, _ = prepare_air_records(path)
-    return records
+    # AirKorea는 다음 시각의 부분 수신 행도 공개하므로 요청 시각 이후 행은 사용하지 않는다.
+    return [row for row in records if row["tm"] <= now.replace(tzinfo=None)]
 
 
 def collect_marine(station_id, now):
@@ -116,10 +115,23 @@ def collect_marine(station_id, now):
             "reqDate": day.strftime("%Y%m%d"),
             "min": 60,
         }
-        with urllib.request.urlopen(
-            MARINE_URL + "?" + urllib.parse.urlencode(params), timeout=15
-        ) as response:
-            payload = json.load(response)
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(
+                    MARINE_URL + "?" + urllib.parse.urlencode(params), timeout=10
+                ) as response:
+                    payload = json.load(response)
+                break
+            except (urllib.error.URLError, TimeoutError) as exc:
+                if attempt or (
+                    isinstance(exc, urllib.error.HTTPError)
+                    and exc.code < 500
+                    and exc.code != 429
+                ):
+                    raise
+                logging.getLogger("uvicorn.error").warning(
+                    "해양 API 일시 통신 실패: %s / 1회 재시도", type(exc).__name__
+                )
         if str(payload.get("header", {}).get("resultCode")) != "00":
             raise CollectionError("TIDE_OBSERVATORY", "UPSTREAM_ERROR")
         body = payload.get("body", {})
@@ -173,7 +185,7 @@ def validate_records(records, now, source):
 
 
 def refresh_observations(station_id, horizons=(3, 6, 9, 12)):
-    """모든 소스 검증 후 원자적으로 적재하고 모델 입력 기준 시각을 반환한다."""
+    """요청별 수집 결과만 반환한다. DB 연결·적재·과거 자료 대체는 하지 않는다."""
     now = datetime.now(KST)
     collectors = {
         "ASOS": collect_asos,
@@ -211,34 +223,40 @@ def refresh_observations(station_id, horizons=(3, 6, 9, 12)):
     except ForecastError as exc:
         raise CollectionError(exc.source, exc.reason) from exc
 
-    try:
-        with get_connection() as conn:
-            conn.execute("SET LOCAL statement_timeout = '10s'")
-            stored = {
-                "ASOS": insert_records(
-                    observations["ASOS"], apply=True, connection=conn
-                ),
-                "AIRKOREA": apply_records(observations["AIRKOREA"], connection=conn),
-            }
-            columns = ["tm", "stn_name", *MARINE_FIELDS.values()]
-            sql = f"""INSERT INTO public.raw_tide_observatory ({', '.join(columns)})
-                VALUES ({', '.join(['%s'] * len(columns))})
-                ON CONFLICT (tm, stn_name) DO UPDATE SET
-                {', '.join(f'{c} = EXCLUDED.{c}' for c in columns if c not in ('tm', 'stn_name'))}"""
-            stored["TIDE_OBSERVATORY"] = 0
-            with conn.cursor() as cur:
-                for row in observations["TIDE_OBSERVATORY"]:
-                    cur.execute(sql, tuple(row[c] for c in columns))
-                    stored["TIDE_OBSERVATORY"] += cur.rowcount
-            stored.update(store_forecasts(conn, station_id, forecasts))
-    except Exception as exc:
-        raise CollectionError("DATABASE", "INGEST_FAILED") from exc
-
+    logging.getLogger("uvicorn.error").info(
+        "[API 수집 완료] 관측소 %s / 기준 %s / 저장: memory",
+        station_id,
+        base_time.isoformat(),
+    )
     return {
         "base_time": base_time,
         "requested_at": now.isoformat(),
         "collected_at": datetime.now(KST).isoformat(),
         "model_input_observed_at": aligned_times,
-        "stored_rows": stored,
-        "forecast_provenance": forecasts["expected"],
+        "storage": "memory",
+        "collected_rows": {
+            source: len(rows)
+            for source, rows in {**observations, **forecasts["records"]}.items()
+        },
+        "observations": observations,
+        "forecast_inputs": forecasts["inputs"],
     }
+
+
+def observation_history(observations, origin):
+    """기존 DB의 정확한 시각 조인과 동일하게 결측 시간을 보간하지 않는다."""
+    air = {row["tm"]: row for row in observations["AIRKOREA"]}
+    return [
+        {
+            "tm": row["tm"],
+            "visibility_km": (
+                row["visibility"] / 100 if row.get("visibility") is not None else None
+            ),
+            "humidity": row.get("humidity"),
+            "pressure": row.get("sea_press"),
+            "pm25": air.get(row["tm"], {}).get("pm25"),
+            "pm10": air.get(row["tm"], {}).get("pm10"),
+        }
+        for row in observations["ASOS"]
+        if origin - timedelta(hours=24) <= row["tm"] <= origin
+    ]

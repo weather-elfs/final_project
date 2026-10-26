@@ -169,6 +169,44 @@ class TunedModelTests(unittest.TestCase):
 
 
 class ForecastParserTests(unittest.TestCase):
+    def test_memory_matching_excludes_future_releases_and_keeps_exact_targets(self):
+        origin = datetime(2026, 10, 25, 18)
+        target = origin + timedelta(hours=3)
+        weather = [
+            dict(
+                base_time_kst=origin + timedelta(hours=offset),
+                fcst_time_kst=target,
+                tmp_1h=17,
+                reh=80,
+                wsd=4,
+                vec=270,
+                pcp_1h=0,
+                pop=10,
+                pty=0,
+                sky=3,
+            )
+            for offset in (-4, -1, 0, 1)
+        ]
+        air = [
+            dict(
+                announce_time=origin + timedelta(hours=offset),
+                target_date=target.date(),
+                fcst_pm25_grade=grade,
+            )
+            for offset, grade in ((-1, 1), (1, 4))
+        ]
+        result = fc.match_forecasts(weather, air, origin, [3])[3]
+        self.assertEqual(result["values"]["fcst_age_h"], 1)
+        self.assertEqual(result["values"]["future_fcst_pm25_grade"], 1)
+        self.assertEqual(result["values"]["future_fcst_wind_dir_sin"], -1)
+        self.assertEqual(result["valid_at"], "2026-10-25T21:00:00+09:00")
+        for horizons, rows in (([6], weather), ([3], weather[:1])):
+            # 4시간 전 발표도 허용하므로, 오래된 발표는 별도로 검사한다.
+            if horizons == [3]:
+                rows = [{**weather[0], "base_time_kst": origin - timedelta(hours=7)}]
+            with self.assertRaises(fc.ForecastError):
+                fc.match_forecasts(rows, air, origin, horizons)
+
     def test_precipitation_uses_training_lower_bound_rule(self):
         for text, value in [
             ("강수없음", 0),
@@ -264,10 +302,22 @@ class ForecastParserTests(unittest.TestCase):
             dict(
                 base_time_kst=origin - timedelta(hours=1),
                 fcst_time_kst=origin + timedelta(hours=3),
+                tmp_1h=17,
+                reh=80,
+                wsd=4,
+                vec=270,
+                pcp_1h=0,
+                pop=10,
+                pty=0,
+                sky=3,
             )
         ]
         air = [
-            dict(announce_time=origin - timedelta(hours=1), target_date=origin.date())
+            dict(
+                announce_time=origin - timedelta(hours=1),
+                target_date=origin.date(),
+                fcst_pm25_grade=1,
+            )
         ]
         with patch.object(fc, "collect_kma", return_value=kma), patch.object(
             fc, "collect_air", return_value=air

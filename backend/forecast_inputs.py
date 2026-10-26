@@ -200,71 +200,12 @@ def collect_forecasts(station_id, origin, horizons):
                 raise
             except Exception as exc:
                 raise ForecastError(source, "COLLECTION_FAILED") from exc
-    kma_times = {row["fcst_time_kst"] for row in result["KMA_FORECAST"]}
-    air_dates = {row["target_date"] for row in result["AIRKOREA_FORECAST"]}
-    result["expected"] = {}
-    for h in horizons:
-        target = origin + timedelta(hours=h)
-        if target not in kma_times or target.date() not in air_dates:
-            raise ForecastError("FORECAST", "TARGET_TIME_MISSING")
-        result["expected"][h] = {
-            "kma_issued_at": next(
-                row["base_time_kst"]
-                for row in result["KMA_FORECAST"]
-                if row["fcst_time_kst"] == target
-            )
-            .replace(tzinfo=KST)
-            .isoformat(),
-            "airkorea_issued_at": max(
-                row["announce_time"]
-                for row in result["AIRKOREA_FORECAST"]
-                if row["target_date"] == target.date()
-            )
-            .replace(tzinfo=KST)
-            .isoformat(),
-        }
-    return result
-
-
-def store_forecasts(conn, station_id, forecasts):
-    """관측 적재와 같은 트랜잭션으로 기존 예보 테이블에 upsert한다."""
-    count = {}
-    columns = [
-        "dong",
-        "base_time_kst",
-        "fcst_lead_time",
-        "fcst_time_kst",
-        *FIELDS.values(),
-    ]
-    keys = {"dong", "base_time_kst", "fcst_lead_time", "fcst_time_kst"}
-    sql = f"""INSERT INTO public.tb_kma_short_forecast ({', '.join(columns)})
-        VALUES ({', '.join(['%s'] * len(columns))})
-        ON CONFLICT (dong, fcst_time_kst, base_time_kst, fcst_lead_time) DO UPDATE SET
-        {', '.join(f'{c}=EXCLUDED.{c}' for c in columns if c not in keys)}"""
-    with conn.cursor() as cur:
-        count["KMA_FORECAST"] = 0
-        for item in forecasts["KMA_FORECAST"]:
-            row = {
-                **item,
-                "dong": DONGS[station_id],
-                "fcst_lead_time": (
-                    item["fcst_time_kst"] - item["base_time_kst"]
-                ).total_seconds()
-                / 3600,
-            }
-            cur.execute(sql, tuple(row[c] for c in columns))
-            count["KMA_FORECAST"] += cur.rowcount
-        count["AIRKOREA_FORECAST"] = 0
-        for row in forecasts["AIRKOREA_FORECAST"]:
-            cur.execute(
-                """INSERT INTO public.raw_air_pm25_forecast
-                (announce_time, target_date, fcst_pm25_grade) VALUES (%s,%s,%s)
-                ON CONFLICT (announce_time, target_date) DO UPDATE SET
-                fcst_pm25_grade=EXCLUDED.fcst_pm25_grade""",
-                (row["announce_time"], row["target_date"], row["fcst_pm25_grade"]),
-            )
-            count["AIRKOREA_FORECAST"] += cur.rowcount
-    return count
+    return {
+        "records": result,
+        "inputs": match_forecasts(
+            result["KMA_FORECAST"], result["AIRKOREA_FORECAST"], origin, horizons
+        ),
+    }
 
 
 def read_forecasts(conn, station_id, origin, horizons):
@@ -277,16 +218,35 @@ def read_forecasts(conn, station_id, origin, horizons):
             ORDER BY fcst_time_kst, base_time_kst DESC""",
             (DONGS[station_id], targets, origin - timedelta(minutes=20)),
         )
-        weather = {row["fcst_time_kst"]: row for row in cur.fetchall()}
+        weather = cur.fetchall()
         cur.execute(
             """SELECT DISTINCT ON (target_date) * FROM public.raw_air_pm25_forecast
             WHERE target_date=ANY(%s) AND announce_time <= %s
             ORDER BY target_date, announce_time DESC""",
             ([t.date() for t in targets], origin),
         )
-        air = {row["target_date"]: row for row in cur.fetchall()}
+        air = cur.fetchall()
+    return match_forecasts(weather, air, origin, horizons)
+
+
+def match_forecasts(weather_rows, air_rows, origin, horizons):
+    """수집 경로와 과거 DB 조회가 같은 공개 시각·대상 시각·입력 변환을 사용한다."""
+    weather, air = {}, {}
+    for row in weather_rows:
+        target, issued = row["fcst_time_kst"], row["base_time_kst"]
+        if issued <= origin - timedelta(minutes=20) and (
+            target not in weather or issued > weather[target]["base_time_kst"]
+        ):
+            weather[target] = row
+    for row in air_rows:
+        target, issued = row["target_date"], row["announce_time"]
+        if issued <= origin and (
+            target not in air or issued > air[target]["announce_time"]
+        ):
+            air[target] = row
     result = {}
-    for h, target in zip(horizons, targets):
+    for h in horizons:
+        target = origin + timedelta(hours=h)
         w, a = weather.get(target), air.get(target.date())
         if (
             not w
@@ -294,9 +254,11 @@ def read_forecasts(conn, station_id, origin, horizons):
             or origin - w["base_time_kst"] > timedelta(hours=6)
             or origin - a["announce_time"] > timedelta(hours=24)
         ):
-            raise ForecastError("FORECAST", "DB_TARGET_MISSING_OR_STALE")
+            raise ForecastError("FORECAST", "TARGET_MISSING_OR_STALE")
         values = {
-            f"future_fcst_{name}": float(w[column]) if w[column] is not None else None
+            f"future_fcst_{name}": (
+                float(w[column]) if w.get(column) is not None else None
+            )
             for name, column in {
                 "temp": "tmp_1h",
                 "humidity": "reh",
@@ -311,7 +273,7 @@ def read_forecasts(conn, station_id, origin, horizons):
         if any(v is None or not math.isfinite(v) for v in values.values()) or a[
             "fcst_pm25_grade"
         ] not in (1, 2, 3, 4):
-            raise ForecastError("FORECAST", "DB_INVALID_VALUE")
+            raise ForecastError("FORECAST", "INVALID_VALUE")
         degrees = values["future_fcst_wind_dir"]
         values.update(
             future_fcst_wind_dir_sin=round(math.sin(math.radians(degrees)), 4),

@@ -1,3 +1,4 @@
+import logging
 import math
 import uuid
 from datetime import timedelta
@@ -5,7 +6,11 @@ from datetime import timedelta
 from backend.aqi import calculate_current_aqi
 from backend.forecast_inputs import ForecastError, read_forecasts
 from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
-from backend.live_observations import CollectionError, refresh_observations
+from backend.live_observations import (
+    CollectionError,
+    observation_history,
+    refresh_observations,
+)
 from backend.model_predict import (
     METADATA_PATH,
     MODEL_PATHS,
@@ -94,32 +99,6 @@ MARINE_MAPPING = {
 }
 
 
-# 관측소 상태 확인 함수
-def get_station_current_status(conn, station_id):
-    sql = """
-        SELECT tm
-        FROM public.raw_weather_asos_realtime
-        WHERE stn_id = %s
-        ORDER BY tm DESC
-        LIMIT 1
-    """
-
-    with conn.cursor() as cur:
-        cur.execute(sql, (station_id,))
-        row = cur.fetchone()
-
-    if row is None:
-        return "FAIL"
-
-    # 현재 시각 기준으로 관측자료 최신성 확인
-    current_time = datetime.now(KST).replace(tzinfo=None)
-
-    status = get_data_status(row["tm"], current_time)
-
-    # 대시보드 설정 API에서 사용하는 상태
-    return "SUCCESS" if status == "OK" else "FAIL"
-
-
 @app.get("/api/v1/dashboard/config")
 def dashboard_config(
     south: float | None = Query(None),
@@ -150,28 +129,21 @@ def dashboard_config(
 
     stations = []
 
-    # PostgreSQL에서 실제 관측소 상태 조회
-    try:
-        with get_connection() as conn:
-            for station in selected_stations:
-                current_status = get_station_current_status(conn, station["station_id"])
-
-                stations.append(
-                    {
-                        **station,
-                        "available": True,
-                        "current_status": current_status,
-                        "forecast_status": (
-                            "SUCCESS"
-                            if all(path.is_file() for path in MODEL_PATHS.values())
-                            and METADATA_PATH.is_file()
-                            else "FAIL"
-                        ),
-                    }
-                )
-
-    except Exception:
-        raise HTTPException(status_code=503, detail="관측소 상태 조회에 실패했습니다.")
+    for station in selected_stations:
+        stations.append(
+            {
+                **station,
+                "available": True,
+                # 아직 수집하지 않은 관측소를 정상으로 표시하지 않는다.
+                "current_status": "UNKNOWN",
+                "forecast_status": (
+                    "SUCCESS"
+                    if all(path.is_file() for path in MODEL_PATHS.values())
+                    and METADATA_PATH.is_file()
+                    else "FAIL"
+                ),
+            }
+        )
 
     return {
         "code": "SUCCESS",
@@ -234,6 +206,10 @@ def get_airkorea_data(conn, station_id, observed_at):
     if row is None:
         return None
 
+    return format_airkorea(row)
+
+
+def format_airkorea(row):
     return {
         "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
         "station_name": row["station_name"],
@@ -280,8 +256,12 @@ def get_marine_data(conn, station_id, observed_at):
     if row is None:
         return None
 
+    return format_marine(row, mapping["source"])
+
+
+def format_marine(row, source="TIDE_OBSERVATORY"):
     return {
-        "source": mapping["source"],
+        "source": source,
         "station_name": row["stn_name"],
         "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
         "water_temperature_c": json_number(row["water_temp"]),
@@ -665,7 +645,7 @@ def station_dashboard(
         description="프론트엔드 연동 테스트용 Mock 예측 데이터 사용 여부",
     ),
 ):
-    """일반 조회는 최신 관측·기상청 단기예보·AirKorea PM2.5 예보 수집 → DB 적재 → 관측+예보 튜닝형 예측 순서로 처리합니다.
+    """일반 조회는 최신 관측·시계열·기상청 단기예보·AirKorea PM2.5 예보를 API에서 수집하고 메모리에서 예측합니다. DB 연결·적재는 하지 않습니다.
 
     기관별 공개 주기가 달라 관측 시각은 요청 시각과 다를 수 있습니다.
     실제 입력 시각은 data.meta.collection.model_input_observed_at에 포함됩니다.
@@ -727,7 +707,7 @@ def station_dashboard(
                 status_code=503,
                 content={
                     "code": "LATEST_DATA_UNAVAILABLE",
-                    "message": "최신 관측자료 수집·적재에 실패해 예측을 실행하지 않았습니다.",
+                    "message": "최신 관측·예보 수집에 실패해 예측을 실행하지 않았습니다.",
                     "data": {
                         "source": exc.source,
                         "reason": exc.reason,
@@ -776,51 +756,58 @@ def station_dashboard(
         if collection is not None:
             query_time = collection["base_time"]
 
-        with get_connection() as conn:
-            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            # ASOS 관측 데이터 조회
-            with conn.cursor() as cur:
-                cur.execute(sql, (station_id, query_time, query_time))
-                row = cur.fetchone()
-
-            # ASOS 관측 시각 기준 AirKorea 데이터 조회
-            airkorea = (
-                get_airkorea_data(conn, station_id, row["tm"])
-                if row is not None
-                else None
-            )
-            # AirKorea 관측 시각 기준 현재 AQI 계산
-            aqi_time = (
-                datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
-                if airkorea is not None
-                else None
-            )
-
-            current_aqi = get_station_aqi(
-                conn,
-                station_id,
-                aqi_time,
-            )
-
-            # 해양 데이터 조회
-            marine = (
-                get_marine_data(conn, station_id, row["tm"])
-                if row is not None
-                else None
-            )
-            forecast_inputs, model_history = {}, []
-            if row is not None and not (mock and station_id == "112"):
-                forecast_inputs = read_forecasts(conn, station_id, row["tm"], horizons)
-                model_history = read_model_history(
-                    conn, station_id, row["tm"], asos_table
+        if collection is not None:
+            observations = collection["observations"]
+            latest = {
+                source: max(
+                    (r for r in records if r["tm"] <= query_time),
+                    key=lambda r: r["tm"],
                 )
-                expected = collection.get("forecast_provenance") if collection else None
-                if expected and any(
-                    forecast_inputs[h][key] != expected[h][key]
-                    for h in horizons
-                    for key in ("kma_issued_at", "airkorea_issued_at")
-                ):
-                    raise ForecastError("FORECAST", "DB_INPUT_MISMATCH")
+                for source, records in observations.items()
+            }
+            row = latest["ASOS"]
+            airkorea = format_airkorea(latest["AIRKOREA"])
+            marine = format_marine(latest["TIDE_OBSERVATORY"])
+            anchor = latest["AIRKOREA"]["tm"].replace(minute=0, second=0, microsecond=0)
+            air_hours = {r["tm"]: r for r in observations["AIRKOREA"]}
+            hours = [air_hours.get(anchor - timedelta(hours=i), {}) for i in range(12)]
+            current_aqi = calculate_current_aqi(
+                [r.get("pm25") for r in hours], [r.get("pm10") for r in hours]
+            )
+            model_history = observation_history(observations, query_time)
+            forecast_inputs = collection["forecast_inputs"]
+        else:
+            with get_connection() as conn:
+                conn.execute(
+                    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                )
+                with conn.cursor() as cur:
+                    cur.execute(sql, (station_id, query_time, query_time))
+                    row = cur.fetchone()
+                airkorea = (
+                    get_airkorea_data(conn, station_id, row["tm"])
+                    if row is not None
+                    else None
+                )
+                aqi_time = (
+                    datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
+                    if airkorea is not None
+                    else None
+                )
+                current_aqi = get_station_aqi(conn, station_id, aqi_time)
+                marine = (
+                    get_marine_data(conn, station_id, row["tm"])
+                    if row is not None
+                    else None
+                )
+                forecast_inputs, model_history = {}, []
+                if row is not None and not (mock and station_id == "112"):
+                    forecast_inputs = read_forecasts(
+                        conn, station_id, row["tm"], horizons
+                    )
+                    model_history = read_model_history(
+                        conn, station_id, row["tm"], asos_table
+                    )
     except ForecastError as exc:
         return JSONResponse(
             status_code=503,
@@ -835,12 +822,12 @@ def station_dashboard(
             },
         )
     except Exception as e:
-        print("DB 조회 오류:", repr(e))
+        print("입력 구성 오류:", type(e).__name__, flush=True)
         return JSONResponse(
             status_code=503,
             content={
-                "code": "DB_ERROR",
-                "message": "DB 데이터 조회에 실패했습니다.",
+                "code": "LATEST_DATA_UNAVAILABLE" if collection else "DB_ERROR",
+                "message": "예측 입력 구성에 실패했습니다.",
                 "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
             },
         )
@@ -910,7 +897,7 @@ def station_dashboard(
                 status_code=503,
                 content={
                     "code": "LATEST_DATA_UNAVAILABLE",
-                    "message": "적재한 최신 자료와 모델 입력이 일치하지 않아 예측을 중단했습니다.",
+                    "message": "수집한 최신 자료와 모델 입력이 일치하지 않아 예측을 중단했습니다.",
                     "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
                 },
             )
@@ -1026,9 +1013,16 @@ def station_dashboard(
             status_code=503,
             content={
                 "code": "FORECAST_FAILED",
-                "message": "최신 관측자료는 적재했으나 예측 결과를 생성하지 못했습니다.",
+                "message": "최신 관측자료는 수집했으나 예측 결과를 생성하지 못했습니다.",
                 "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
             },
+        )
+
+    if collection is not None:
+        logging.getLogger("uvicorn.error").info(
+            "[예측 완료] 관측소 %s / 예측 간격 %s시간 / 4개 시점",
+            station_id,
+            forecast_interval_h,
         )
 
     forecast_summary = get_forecast_summary(selected_forecast_timeline)
@@ -1169,7 +1163,7 @@ def station_dashboard(
                     {
                         key: value
                         for key, value in collection.items()
-                        if key != "base_time"
+                        if key not in ("base_time", "observations", "forecast_inputs")
                     }
                     if collection is not None
                     else None
