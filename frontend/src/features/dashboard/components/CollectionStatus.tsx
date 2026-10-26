@@ -20,8 +20,9 @@ export default function CollectionStatus({ dashboard, loading, retryingSource, o
       <span><b>{DATA_SOURCE_LABELS[source] ?? source}</b><small>{SOURCE_FAILURE_MESSAGES[reason] ?? '입력 자료를 확인할 수 없습니다.'}</small></span>
       {onRetrySource && collection?.retryableSources?.includes(source) && <button type="button"
         disabled={loading || Boolean(retryingSource) || expired}
+        aria-busy={retryingSource === source}
         aria-label={`${DATA_SOURCE_LABELS[source] ?? source}만 재시도`}
-        onClick={() => onRetrySource(source)}>{retryingSource === source ? '재시도 중…' : '재시도'}</button>}
+        onClick={() => onRetrySource(source)}>{retryingSource === source && <span className="loading-spinner" aria-hidden="true" />}{retryingSource === source ? '재시도 중…' : '재시도'}</button>}
     </div>)}
     {expired && <p>자료 보관 시간이 지났습니다. 현재 관측 갱신으로 전체 자료를 다시 받아주세요.</p>}
   </aside>;

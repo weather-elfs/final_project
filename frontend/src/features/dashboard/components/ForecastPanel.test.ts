@@ -5,13 +5,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import ForecastPanel from './ForecastPanel';
 
-function renderForecast(visibilityPredKm: number | null) {
+function renderForecast(visibilityPredKm: number | null, loading = false) {
   return renderToStaticMarkup(createElement(ForecastPanel, {
     dashboard: { forecastTimeline: [{ horizonH: 3, validAt: '2026-10-26T11:00:00+09:00', visibilityPredKm }] },
     requested: true,
-    loading: false,
+    loading,
   }));
 }
+
+test('조회 즉시 카드 로딩을 표시하고 기존 예측 수치는 유지하며 완료 시 제거한다', () => {
+  const pending = renderForecast(12, true);
+  assert.match(pending, /aria-busy="true"/);
+  assert.match(pending, /class="card-loading-overlay" role="status"/);
+  assert.match(pending, /예측 결과 조회 중/);
+  assert.match(pending, /12.0 km/);
+  assert.doesNotMatch(renderForecast(12), /card-loading-overlay/);
+});
 
 test('안개 없음은 예측 표와 종합 예측 모두 단계 없이 이름만 표시한다', () => {
   for (const visibility of [10, 50]) {

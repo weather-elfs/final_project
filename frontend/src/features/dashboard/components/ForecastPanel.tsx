@@ -2,6 +2,7 @@ import { fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
 import { DATA_SOURCE_LABELS } from '../stationStatus';
+import CardLoadingOverlay from './CardLoadingOverlay';
 
 const TARGET_LABELS: Record<string, string> = { visibility_km: '시정', pm25: 'PM2.5', pm10: 'PM10' };
 
@@ -29,7 +30,8 @@ export default function ForecastPanel({ dashboard, requested, loading, available
   };
 
   return (
-    <section className="panel forecast-panel" aria-labelledby="forecast-title">
+    <section className="panel forecast-panel" aria-labelledby="forecast-title" aria-busy={loading}>
+      {loading && <CardLoadingOverlay label="예측 결과 조회 중" />}
       <div className="panel-header forecast-header">
         <h2 id="forecast-title">시간대별 예측</h2>
         {forecast.length > 0 && (
@@ -40,8 +42,6 @@ export default function ForecastPanel({ dashboard, requested, loading, available
         <div className="forecast-empty"><strong>예측 서비스 미제공</strong><span>현재 관측 자료는 확인할 수 있지만 예측 모델은 아직 연동되지 않았습니다.</span></div>
       ) : !requested ? (
         <div className="forecast-empty"><strong>예측 결과가 없습니다</strong><span>작전 환경을 설정한 뒤 시간대별 예측을 실행하세요.</span></div>
-      ) : loading ? (
-        <div className="forecast-empty" role="status"><strong>예측 결과 조회 중</strong><span>선택한 조건의 4개 시점을 불러오고 있습니다.</span></div>
       ) : forecast.length === 0 ? (
         <div className="forecast-empty"><strong>예측 결과가 없습니다</strong><span>선택한 조건에 해당하는 예측 자료가 없습니다.</span></div>
       ) : (

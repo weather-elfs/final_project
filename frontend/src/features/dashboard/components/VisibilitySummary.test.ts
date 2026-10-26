@@ -106,7 +106,21 @@ test('부분 성공은 기존 관측과 출처별 재시도 버튼을 함께 유
   assert.match(markup, /10 µg\/m³/);
   assert.match(markup, /국립해양조사원만 재시도/);
   assert.match(markup, /재시도 중…/);
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /class="loading-spinner"/);
+  assert.doesNotMatch(markup, /card-loading-overlay/);
   assert.match(markup, /일부 자료 누락/);
+});
+
+test('현재 기상 조회는 즉시 카드 로딩을 표시하면서 기존 관측을 유지한다', () => {
+  const markup = renderToStaticMarkup(createElement(VisibilitySummary, {
+    dashboard: { current: { visibilityKm: 20 } }, loading: true, onRefresh: () => {},
+  }));
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /class="card-loading-overlay" role="status"/);
+  assert.match(markup, /현재 기상 조회 중/);
+  assert.match(markup, /20.0 km/);
+  assert.doesNotMatch(renderSummary({ current: { visibilityKm: 20 } }), /card-loading-overlay/);
 });
 test('예보 발표·수집 시각은 관측 시각과 구분하고 일부 누락 사유를 표시한다', () => {
   const message = sourceStatusMessage({ source: 'AIRKOREA_FORECAST', status: 'partial', issuedAt: '2026-10-26T05:00:00+09:00', collectedAt: '2026-10-26T10:00:00+09:00', reason: 'TARGET_TIME_MISSING_OR_STALE' });

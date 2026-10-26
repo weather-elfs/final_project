@@ -4,6 +4,7 @@ import { AIR_QUALITY_CRITERIA, airQualityByAqi, airQualityByParticles, fogGradeB
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData, SourceStatusDetail } from '../types';
 import { DATA_SOURCE_LABELS, SOURCE_FAILURE_MESSAGES } from '../stationStatus';
+import CardLoadingOverlay from './CardLoadingOverlay';
 
 const FOG_CRITERIA = [
   { stage: '안개 없음', label: '시정 양호', range: '10 km 이상', tone: 'sky' },
@@ -137,7 +138,8 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
   }, [statusOpen]);
 
   return (
-    <section className="panel current-weather-panel" aria-labelledby="current-weather-title">
+    <section className="panel current-weather-panel" aria-labelledby="current-weather-title" aria-busy={loading}>
+      {loading && <CardLoadingOverlay label="현재 기상 조회 중" />}
       <div className="panel-header current-weather-header">
         <h2 id="current-weather-title">현재 기상</h2>
         <div className="observation-actions">
@@ -148,6 +150,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
               <button
                 type="button"
                 className="status-info"
+                disabled={loading}
                 aria-label="출처별 데이터 상태 보기"
                 aria-haspopup="dialog"
                 aria-expanded={statusOpen}
@@ -161,7 +164,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
               </button>
             </div>
             <span className="observation-time">갱신 시각 {formatKstTime(lastRefreshAt)} KST</span>
-            {statusOpen && (
+            {statusOpen && !loading && (
               <div
                 id="data-status-popover"
                 className="data-status-popover"
@@ -209,6 +212,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
         <button
           type="button"
           className="criteria-info-button"
+          disabled={loading}
           aria-label="시정 영향 단계 기준 보기"
           aria-haspopup="dialog"
           aria-expanded={criteriaOpen}
@@ -220,7 +224,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
         >
           <span aria-hidden="true">i</span>
         </button>
-        {criteriaOpen && (
+        {criteriaOpen && !loading && (
           <div
             id="stage-criteria-popover"
             className="stage-criteria-popover"
