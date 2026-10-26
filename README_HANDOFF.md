@@ -1,6 +1,6 @@
-# WeatherElfs Backend — teammate handoff (updated 2026-10-25)
+# WeatherElfs Backend — teammate handoff (updated 2026-10-26)
 
-## Latest-data request flow (2026-10-25)
+## Latest-data request flow (2026-10-26)
 
 AQI responsibility (verified 2026-10-26): the backend computes the PM2.5/PM10
 NowCast from actual hourly observations, retaining missing hourly slots. Invalid
@@ -32,51 +32,58 @@ python -m backend.import_tuned_models "C:\path\to\최종모델.zip"
 - Forecasts are matched at `origin + horizon`, using KMA releases publicly available at the
   observation origin (20-minute publication margin) and PM releases no later than that origin.
   Neighboring target hours or future releases are never substituted.
-- The same observation transaction also upserts existing `tb_kma_short_forecast` and
-  `raw_air_pm25_forecast`. No schema change, deletion, or duplicate insertion into the unindexed
-  `mart_forecast_pit_48h` is performed. Prediction reads those rows in the same DB snapshot as observations.
+- Live requests match the collected forecast rows in memory. Historical DB reads use the same
+  matching/conversion function. Live collection does not open a DB connection or write any tables.
 - The tuned output is not a final concentration: `result = expm1(log1p(current) + residual × sigma[h])`.
   Clamp below at zero; visibility additionally uses the original train-target maximum from metadata.
 - PM1 and wave height/period are currently unavailable and remain NaN as supported by CatBoost;
   they are never filled with zero or stale observations. Missing current visibility/PM baselines abort prediction.
 - `meta.model` identifies this model, its inverse transform and missing input features.
   `meta.forecasts[]` gives each horizon's actual numeric forecast inputs, valid time and separate
-  KMA/AirKorea issue times. `meta.collection.forecast_provenance` verifies fetched vs DB-read releases.
-- Missing/old/incorrectly matched stored forecasts return HTTP 503 `FORECAST_INPUT_UNAVAILABLE`.
+  KMA/AirKorea issue times.
+- Missing/old/incorrectly matched live forecasts return HTTP 503 `LATEST_DATA_UNAVAILABLE`.
   `as_of` does not collect or write: historical predictions require matching historical forecast rows already in DB.
 
 Normal dashboard requests without `as_of` now collect the selected station's ASOS,
-AirKorea and KHOA observations in parallel, then obtain weather/PM forecasts, validate them, upsert all five sources
-in one PostgreSQL transaction, then read a consistent snapshot and run the existing
-CatBoost model for four horizons. Displayed PM, NowCast AQI and model inputs use the
-same DB snapshot; the local AirKorea CSV no longer overrides API responses.
+AirKorea and KHOA observations in parallel, then obtain weather/PM forecasts, validate them,
+and run the existing CatBoost model for four horizons from that request's in-memory records.
+Displayed PM, NowCast AQI and model inputs use the same collected records.
+No DB credentials, connection, persistence or DB fallback are used for normal live requests
+or `/api/v1/dashboard/config`. Config marks uncollected current status as `UNKNOWN`;
+the frontend uses the selected station's actual dashboard status after collection.
 
 - Collectors: `backend/live_observations.py`, `backend/forecast_inputs.py`. Reuse the existing ASOS/AirKorea collectors and ingestion validators.
-- Required server environment: `DB_*`, `KMA_AUTH_KEY` (fallback `KMA_API_KEY`),
+- Required live server environment: `KMA_AUTH_KEY` (fallback `KMA_API_KEY`),
   `AIRKOREA_API_KEY` (fallback `DATA_API_KEY`), and `DATA_API_KEY` for KHOA.
   Keep `KMA_API_KEY` for weather labels. Keys must have the relevant API permissions.
 - KHOA: [조위관측소 최신 관측데이터](https://www.data.go.kr/data/15155508/openapi.do),
   `dtRecent/GetDTRecentApiService`. The approved hourly query uses `obsCode=DT_0001`
   (인천) or `IE_0062` (옹진소청초); the latter retains DB/model name `소청초`.
   Existing station mapping is preserved: 102 → 소청초; 112/201 → 인천.
-- Upserts target `raw_weather_asos_realtime`, `raw_air_quality`, `raw_tide_observatory`,
-  `tb_kma_short_forecast`, `raw_air_pm25_forecast`. Same keys update corrected values; no schema
-  changes or historical deletion. `stored_rows` counts inserts and updates, not new rows only.
+- Request data is discarded after responding. There is no durable collection history in this mode.
 - All sources must have observations at or before the ASOS base time, no older
   than two hours at collection start. Future/nonfinite/invalid measurements are rejected.
-  Actual DB input times are rechecked before model execution. Null instrument values
+  AirKorea may publish a future hourly row with only some pollutants; all rows after the
+  request time are excluded, regardless of which measurements are already present.
+  KHOA timeout/network/HTTP 429 or 5xx failures are retried once; each attempt times out after 10 seconds.
+  Collected input times are rechecked before model execution. Null instrument values
   remain null; the existing model's missing-value handling is unchanged.
-- Collection/ingestion/input mismatch returns HTTP 503 `LATEST_DATA_UNAVAILABLE`;
+- Collection/input mismatch returns HTTP 503 `LATEST_DATA_UNAVAILABLE`;
   model failure returns HTTP 503 `FORECAST_FAILED`. Old observations are not substituted.
-  Failed ingestion rolls back all five sources. A model failure does not undo already
-  committed valid observations.
 - `as_of` remains a read-only historical query. The existing Incheon `mock=true`
-  response bypasses collection. No scheduler or background collection process is required.
+  response bypasses collection. These legacy paths still require DB credentials/data;
+  a DB-free deployment should omit `as_of` and use `mock=false`.
+  No scheduler or background collection process is required.
 - `meta.collection` reports `requested_at`, `collected_at`,
-  `model_input_observed_at` and `stored_rows`. Forecast times are ASOS base time + horizon.
+  `model_input_observed_at`, `collected_rows` and `storage: "memory"`.
+  Forecast times are ASOS base time + horizon.
   Sources publish on their own schedules: request time is not observation time.
 - Existing DB timestamps remain naive KST for compatibility; API timestamps include `+09:00`.
   This change does not retrain or validate forecast accuracy.
+
+Live logs contain `[API 수집 완료]`, `[예측 완료]` and the dashboard request HTTP status.
+`/api/health` alone does not verify external collection or prediction. External API timeouts,
+missing observations and unpublished forecast dates can still fail the request without DB involvement.
 
 The 2026-10-23 package notes below describe the old snapshot. Its CSV loop is optional
 legacy tooling and is not used by the latest-data dashboard request.
