@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import math
 from datetime import timedelta
 from functools import lru_cache
@@ -47,6 +48,8 @@ def number(value):
 
 def dewpoint(temperature, humidity):
     """원본 노트북의 Magnus 식을 그대로 사용한다."""
+    if not all(math.isfinite(v) for v in (temperature, humidity)):
+        return float("nan")
     gamma = math.log(max(1, min(100, humidity)) / 100) + 17.62 * temperature / (
         243.12 + temperature
     )
@@ -85,8 +88,8 @@ def build_model_input(
     direction = number(asos["wind_dir"]) * 10  # ASOS 원천 WD는 10도 단위다.
     visibility = number(asos["visibility"]) / 100  # 원천 시정 단위는 10m다.
     pm25, pm10 = number(airkorea["pm25_ug_m3"]), number(airkorea["pm10_ug_m3"])
-    if any(not math.isfinite(v) or v < 0 for v in (visibility, pm25, pm10)):
-        raise ValueError("튜닝형 출력 복원에 필요한 현재 시정·PM 관측값 누락")
+    if any(math.isfinite(v) and v < 0 for v in (visibility, pm25, pm10)):
+        raise ValueError("현재 시정·PM 관측값은 음수일 수 없습니다.")
     future = observed_at + timedelta(hours=h)
     sea = number(marine["water_temperature_c"])
     buoy_air = number(marine["air_temperature_c"])
@@ -109,7 +112,11 @@ def build_model_input(
         wind_dir_sin=round(math.sin(math.radians(direction)), 4),
         wind_dir_cos=round(math.cos(math.radians(direction)), 4),
         pressure=number(asos["sea_press"]),
-        precipitation=0.0 if asos["rainfall"] is None else number(asos["rainfall"]),
+        precipitation=(
+            float("nan")
+            if asos.get("_missing")
+            else 0.0 if asos["rainfall"] is None else number(asos["rainfall"])
+        ),
         cloud_cover=number(asos["cloud"]),
         sea_temp=sea,
         buoy_air_temp=buoy_air,
@@ -172,13 +179,19 @@ def build_model_input(
         v=-features["wind_speed"] * features["wind_dir_cos"],
         diff_3h_humidity=frame.humidity.iloc[-1] - frame.humidity.iloc[-4],
         diff_3h_pressure=frame.pressure.iloc[-1] - frame.pressure.iloc[-4],
-        pm_ratio=min(1, max(0, pm25 / (pm10 + 1e-5))),
+        pm_ratio=(
+            min(1, max(0, pm25 / (pm10 + 1e-5)))
+            if math.isfinite(pm25) and math.isfinite(pm10)
+            else float("nan")
+        ),
     )
     if pd.Timestamp(forecast["valid_at"]).tz_convert(KST).tz_localize(
         None
     ) != pd.Timestamp(future):
         raise ValueError("예보 대상시각 불일치")
     for key in ("kma_issued_at", "airkorea_issued_at"):
+        if forecast[key] is None:
+            continue
         issued = pd.Timestamp(forecast[key]).tz_convert(KST).tz_localize(None)
         if issued > observed_at:
             raise ValueError("미래에 발표된 예보 입력 금지")
@@ -204,14 +217,29 @@ def predict_visibility_pm(
         station_id, observed_at, h, asos, airkorea, marine, history, forecast
     )
     result = {}
+    unavailable = []
     for target, model in models.items():
-        residual = float(model.predict(inputs)[0])
-        sigma = metadata["targets"][target]["sigma_by_h"][str(h)]
         current = float(inputs[target].iloc[0])
-        value = math.expm1(math.log1p(max(0, current)) + residual * sigma)
-        if not math.isfinite(value):
-            raise ValueError("비정상 튜닝형 출력")
-        high = metadata["targets"][target]["clip_max"]
-        result[target] = max(0, min(value, high)) if high is not None else max(0, value)
+        if not math.isfinite(current):
+            result[target] = None
+            unavailable.append(target)
+            continue
+        try:
+            residual = float(model.predict(inputs)[0])
+            sigma = metadata["targets"][target]["sigma_by_h"][str(h)]
+            value = math.expm1(math.log1p(max(0, current)) + residual * sigma)
+            if not math.isfinite(value):
+                raise ValueError("비정상 튜닝형 출력")
+            high = metadata["targets"][target]["clip_max"]
+            result[target] = (
+                max(0, min(value, high)) if high is not None else max(0, value)
+            )
+        except Exception as exc:
+            logging.getLogger("uvicorn.error").warning(
+                "예측 항목 실패: %s / %s시간 / %s", target, h, type(exc).__name__
+            )
+            result[target] = None
+            unavailable.append(target)
     result["missing_features"] = inputs.columns[inputs.isna().iloc[0]].tolist()
+    result["unavailable_targets"] = unavailable
     return result

@@ -6,7 +6,6 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -185,29 +184,6 @@ def collect_air(origin):
     return list(rows.values())
 
 
-def collect_forecasts(station_id, origin, horizons):
-    """두 기관을 병렬 수집하고 요청한 모든 대상시각을 검증한다."""
-    result = {}
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {
-            "KMA_FORECAST": pool.submit(collect_kma, station_id, origin),
-            "AIRKOREA_FORECAST": pool.submit(collect_air, origin),
-        }
-        for source, future in futures.items():
-            try:
-                result[source] = future.result()
-            except ForecastError:
-                raise
-            except Exception as exc:
-                raise ForecastError(source, "COLLECTION_FAILED") from exc
-    return {
-        "records": result,
-        "inputs": match_forecasts(
-            result["KMA_FORECAST"], result["AIRKOREA_FORECAST"], origin, horizons
-        ),
-    }
-
-
 def read_forecasts(conn, station_id, origin, horizons):
     """공개 시점·대상시각으로 DB 예보를 매칭하고 모델 입력 및 계보를 반환한다."""
     targets = [origin + timedelta(hours=h) for h in horizons]
@@ -229,7 +205,7 @@ def read_forecasts(conn, station_id, origin, horizons):
     return match_forecasts(weather, air, origin, horizons)
 
 
-def match_forecasts(weather_rows, air_rows, origin, horizons):
+def match_forecasts(weather_rows, air_rows, origin, horizons, allow_missing=False):
     """수집 경로와 과거 DB 조회가 같은 공개 시각·대상 시각·입력 변환을 사용한다."""
     weather, air = {}, {}
     for row in weather_rows:
@@ -248,16 +224,15 @@ def match_forecasts(weather_rows, air_rows, origin, horizons):
     for h in horizons:
         target = origin + timedelta(hours=h)
         w, a = weather.get(target), air.get(target.date())
-        if (
-            not w
-            or not a
-            or origin - w["base_time_kst"] > timedelta(hours=6)
-            or origin - a["announce_time"] > timedelta(hours=24)
-        ):
+        if w and origin - w["base_time_kst"] > timedelta(hours=6):
+            w = None
+        if a and origin - a["announce_time"] > timedelta(hours=24):
+            a = None
+        if not allow_missing and (not w or not a):
             raise ForecastError("FORECAST", "TARGET_MISSING_OR_STALE")
         values = {
             f"future_fcst_{name}": (
-                float(w[column]) if w.get(column) is not None else None
+                float(w[column]) if w and w.get(column) is not None else float("nan")
             )
             for name, column in {
                 "temp": "tmp_1h",
@@ -270,21 +245,34 @@ def match_forecasts(weather_rows, air_rows, origin, horizons):
                 "sky": "sky",
             }.items()
         }
-        if any(v is None or not math.isfinite(v) for v in values.values()) or a[
-            "fcst_pm25_grade"
-        ] not in (1, 2, 3, 4):
+        missing = []
+        if any(not math.isfinite(v) for v in values.values()):
+            missing.append("KMA_FORECAST")
+        grade = a.get("fcst_pm25_grade") if a else None
+        if grade not in (1, 2, 3, 4):
+            missing.append("AIRKOREA_FORECAST")
+        if missing and not allow_missing:
             raise ForecastError("FORECAST", "INVALID_VALUE")
         degrees = values["future_fcst_wind_dir"]
         values.update(
             future_fcst_wind_dir_sin=round(math.sin(math.radians(degrees)), 4),
             future_fcst_wind_dir_cos=round(math.cos(math.radians(degrees)), 4),
-            future_fcst_pm25_grade=a["fcst_pm25_grade"],
-            fcst_age_h=(origin - w["base_time_kst"]).total_seconds() / 3600,
+            future_fcst_pm25_grade=grade if grade in (1, 2, 3, 4) else float("nan"),
+            fcst_age_h=(
+                (origin - w["base_time_kst"]).total_seconds() / 3600
+                if w
+                else float("nan")
+            ),
         )
         result[h] = {
             "values": values,
             "valid_at": target.replace(tzinfo=KST).isoformat(),
-            "kma_issued_at": w["base_time_kst"].replace(tzinfo=KST).isoformat(),
-            "airkorea_issued_at": a["announce_time"].replace(tzinfo=KST).isoformat(),
+            "kma_issued_at": (
+                w["base_time_kst"].replace(tzinfo=KST).isoformat() if w else None
+            ),
+            "airkorea_issued_at": (
+                a["announce_time"].replace(tzinfo=KST).isoformat() if a else None
+            ),
+            "missing_sources": missing,
         }
     return result

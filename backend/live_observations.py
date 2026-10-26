@@ -7,14 +7,19 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+import uuid
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, wait
+from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
+from time import monotonic
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from backend.forecast_inputs import ForecastError, collect_forecasts
+from backend.forecast_inputs import collect_air, collect_kma, match_forecasts
 from backend.ingest_asos import prepare_records, validate_csv
 
 from backend_airkorea_test.ingest_airkorea import prepare_records as prepare_air_records
@@ -22,6 +27,14 @@ from src.collectors.api import airkorea_collector, asos_collector
 
 KST = ZoneInfo("Asia/Seoul")
 MAX_AGE = timedelta(hours=2)
+SESSION_SECONDS = 600
+MAX_SESSIONS = 64
+COLLECTION_PHASE_SECONDS = 25
+OBSERVATION_SOURCES = ("ASOS", "AIRKOREA", "TIDE_OBSERVATORY")
+FORECAST_SOURCES = ("KMA_FORECAST", "AIRKOREA_FORECAST")
+SOURCES = (*OBSERVATION_SOURCES, *FORECAST_SOURCES)
+_sessions = OrderedDict()
+_sessions_lock = Lock()
 MARINE_URL = "https://apis.data.go.kr/1192136/dtRecent/GetDTRecentApiService"
 # 국립해양조사원 공식 활용가이드의 관측소 목록. 기존 모델의 지점 매핑을 유지한다.
 STATIONS = {
@@ -184,63 +197,185 @@ def validate_records(records, now, source):
     require_fresh(max(row["tm"] for row in records).replace(tzinfo=KST), now, source)
 
 
-def refresh_observations(station_id, horizons=(3, 6, 9, 12)):
-    """요청별 수집 결과만 반환한다. DB 연결·적재·과거 자료 대체는 하지 않는다."""
+def refresh_observations(
+    station_id, horizons=(3, 6, 9, 12), *, collection_id=None, retry_source=None
+):
+    """성공한 자료는 최대 10분 보관하고 같은 조회 조건에서 실패 출처만 다시 수집한다."""
     now = datetime.now(KST)
-    collectors = {
-        "ASOS": collect_asos,
-        "AIRKOREA": collect_airkorea,
-        "TIDE_OBSERVATORY": collect_marine,
-    }
-    observations = {}
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
-            source: pool.submit(collect, station_id, now)
-            for source, collect in collectors.items()
+    if bool(collection_id) != bool(retry_source) or (
+        retry_source and retry_source not in SOURCES
+    ):
+        raise CollectionError("REQUEST", "INVALID_RETRY")
+    with _sessions_lock:
+        for key, session in list(_sessions.items()):
+            if monotonic() - session["created"] >= SESSION_SECONDS:
+                del _sessions[key]
+        if collection_id:
+            entry = _sessions.get(collection_id)
+            if entry is None:
+                raise CollectionError("REQUEST", "COLLECTION_EXPIRED")
+        else:
+            collection_id = uuid.uuid4().hex
+            entry = {
+                "created": monotonic(),
+                "lock": Lock(),
+                "data": {
+                    "station_id": station_id,
+                    "horizons": tuple(horizons),
+                    "records": dict.fromkeys(SOURCES),
+                    "errors": {},
+                    "fetched_at": {},
+                    "requested_at": now.isoformat(),
+                    "expires_at": (
+                        now + timedelta(seconds=SESSION_SECONDS)
+                    ).isoformat(),
+                },
+            }
+            _sessions[collection_id] = entry
+            while len(_sessions) > MAX_SESSIONS:
+                _sessions.popitem(last=False)
+
+    with entry["lock"]:
+        state = entry["data"]
+        if state["station_id"] != station_id or state["horizons"] != tuple(horizons):
+            raise CollectionError("REQUEST", "RETRY_CONTEXT_MISMATCH")
+        if retry_source and retry_source not in state.get("retryable_sources", []):
+            raise CollectionError("REQUEST", "SOURCE_NOT_RETRYABLE")
+        collectors = {
+            "ASOS": collect_asos,
+            "AIRKOREA": collect_airkorea,
+            "TIDE_OBSERVATORY": collect_marine,
+            "KMA_FORECAST": collect_kma,
+            "AIRKOREA_FORECAST": collect_air,
         }
-        for source, future in futures.items():
+
+        def collect(sources):
+            pool = ThreadPoolExecutor(max_workers=len(sources))
             try:
-                records = future.result()
-                validate_records(records, now, source)
-                observations[source] = records
-            except CollectionError:
-                raise
-            except Exception as exc:
-                raise CollectionError(source, "COLLECTION_FAILED") from exc
+                futures = {}
+                for source in sources:
+                    args = (
+                        (station_id, now)
+                        if source in OBSERVATION_SOURCES
+                        else (
+                            (station_id, state["base_time"])
+                            if source == "KMA_FORECAST"
+                            else (state["base_time"],)
+                        )
+                    )
+                    futures[source] = pool.submit(collectors[source], *args)
+                _, pending = wait(futures.values(), timeout=COLLECTION_PHASE_SECONDS)
+                for source, future in futures.items():
+                    try:
+                        if future in pending:
+                            future.cancel()
+                            raise TimeoutError()
+                        rows = future.result()
+                        if source in OBSERVATION_SOURCES:
+                            validate_records(rows, now, source)
+                        elif not rows:
+                            raise CollectionError(source, "EMPTY_DATA")
+                        state["records"][source] = rows
+                        state["errors"].pop(source, None)
+                        state["fetched_at"][source] = datetime.now(KST).isoformat()
+                    except Exception as exc:
+                        state["records"][source] = []
+                        state["errors"][source] = (
+                            exc.reason
+                            if isinstance(exc, CollectionError)
+                            else (
+                                "TIMEOUT"
+                                if isinstance(exc, TimeoutError)
+                                else "COLLECTION_FAILED"
+                            )
+                        )
+                        logging.getLogger("uvicorn.error").warning(
+                            "API 부분 실패: %s / %s / %s",
+                            source,
+                            state["errors"][source],
+                            type(exc).__name__,
+                        )
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
 
-    base_time = max(row["tm"] for row in observations["ASOS"])
-    aligned_times = {}
-    for source, records in observations.items():
-        aligned = [row for row in records if row["tm"] <= base_time]
-        if not aligned:
-            raise CollectionError(source, "NO_ALIGNED_OBSERVATION")
-        tm = max(row["tm"] for row in aligned)
-        require_fresh(tm.replace(tzinfo=KST), now, source)
-        aligned_times[source] = tm.replace(tzinfo=KST).isoformat()
+        if not retry_source or retry_source in OBSERVATION_SOURCES:
+            collect([retry_source] if retry_source else OBSERVATION_SOURCES)
+        asos = state["records"]["ASOS"] or []
+        available = asos or [
+            r for s in OBSERVATION_SOURCES for r in state["records"][s] or []
+        ]
+        state["base_time"] = (
+            max(r["tm"] for r in available)
+            if available
+            else now.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+        )
+        if not retry_source or retry_source in FORECAST_SOURCES:
+            collect([retry_source] if retry_source else FORECAST_SOURCES)
 
-    try:
-        forecasts = collect_forecasts(station_id, base_time, horizons)
-    except ForecastError as exc:
-        raise CollectionError(exc.source, exc.reason) from exc
-
-    logging.getLogger("uvicorn.error").info(
-        "[API 수집 완료] 관측소 %s / 기준 %s / 저장: memory",
-        station_id,
-        base_time.isoformat(),
-    )
-    return {
-        "base_time": base_time,
-        "requested_at": now.isoformat(),
-        "collected_at": datetime.now(KST).isoformat(),
-        "model_input_observed_at": aligned_times,
-        "storage": "memory",
-        "collected_rows": {
-            source: len(rows)
-            for source, rows in {**observations, **forecasts["records"]}.items()
-        },
-        "observations": observations,
-        "forecast_inputs": forecasts["inputs"],
-    }
+        errors = dict(state["errors"])
+        observations, aligned_times = {}, {}
+        for source in OBSERVATION_SOURCES:
+            rows = [
+                r
+                for r in state["records"][source] or []
+                if r["tm"] <= state["base_time"]
+            ]
+            try:
+                validate_records(rows, now, source)
+            except CollectionError as exc:
+                errors.setdefault(source, exc.reason)
+                rows = []
+            observations[source] = rows
+            baseline_fields = {
+                "ASOS": ("visibility",),
+                "AIRKOREA": ("pm25", "pm10"),
+            }.get(source, ())
+            if rows and any(
+                max(rows, key=lambda r: r["tm"]).get(field) is None
+                for field in baseline_fields
+            ):
+                errors.setdefault(source, "BASELINE_MISSING")
+            aligned_times[source] = (
+                max(r["tm"] for r in rows).replace(tzinfo=KST).isoformat()
+                if rows
+                else None
+            )
+        forecasts = match_forecasts(
+            state["records"]["KMA_FORECAST"] or [],
+            state["records"]["AIRKOREA_FORECAST"] or [],
+            state["base_time"],
+            horizons,
+            allow_missing=True,
+        )
+        for forecast in forecasts.values():
+            for source in forecast["missing_sources"]:
+                errors.setdefault(source, "TARGET_TIME_MISSING_OR_STALE")
+        state["retryable_sources"] = [source for source in SOURCES if source in errors]
+        logging.getLogger("uvicorn.error").info(
+            "[API 수집 완료] 관측소 %s / 재시도 %s / 누락 %s",
+            station_id,
+            retry_source,
+            state["retryable_sources"],
+        )
+        return deepcopy(
+            {
+                "id": collection_id,
+                "base_time": state["base_time"],
+                "requested_at": state["requested_at"],
+                "collected_at": datetime.now(KST).isoformat(),
+                "expires_at": state["expires_at"],
+                "storage": "memory",
+                "fetched_at": state["fetched_at"],
+                "errors": errors,
+                "retryable_sources": state["retryable_sources"],
+                "model_input_observed_at": aligned_times,
+                "collected_rows": {
+                    s: len(rows or []) for s, rows in state["records"].items()
+                },
+                "observations": observations,
+                "forecast_inputs": forecasts,
+            }
+        )
 
 
 def observation_history(observations, origin):

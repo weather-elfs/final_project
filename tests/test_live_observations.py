@@ -1,5 +1,6 @@
 """외부 API를 고정하고 DB 연결 없이 최신 수집·예측 순서를 검증한다."""
 
+import math
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -12,20 +13,50 @@ from backend import main
 
 class LiveCollectionTests(unittest.TestCase):
     def setUp(self):
-        stub = patch.object(
-            live,
-            "collect_forecasts",
-            return_value={
-                "inputs": {},
-                "records": {"KMA_FORECAST": [1] * 4, "AIRKOREA_FORECAST": [1] * 3},
-            },
-        )
-        stub.start()
-        self.addCleanup(stub.stop)
         self.now = datetime.now(live.KST)
         self.base = self.now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
-        self.asos = [{"tm": self.base, "stn_id": "112", "temp": 21.0}]
-        self.air = [{"tm": self.base, "station_code": "823632", "pm25": 10.0}]
+        live._sessions.clear()
+        self.addCleanup(live._sessions.clear)
+        for name, rows in (
+            (
+                "collect_kma",
+                [
+                    dict(
+                        base_time_kst=self.base - timedelta(hours=1),
+                        fcst_time_kst=self.base + timedelta(hours=h),
+                        tmp_1h=17,
+                        reh=80,
+                        wsd=4,
+                        vec=270,
+                        pcp_1h=0,
+                        pop=10,
+                        pty=0,
+                        sky=3,
+                    )
+                    for h in range(1, 49)
+                ],
+            ),
+            (
+                "collect_air",
+                [
+                    dict(
+                        announce_time=self.base - timedelta(hours=1),
+                        target_date=(self.base + timedelta(days=d)).date(),
+                        fcst_pm25_grade=1,
+                    )
+                    for d in range(3)
+                ],
+            ),
+        ):
+            stub = patch.object(live, name, return_value=rows)
+            stub.start()
+            self.addCleanup(stub.stop)
+        self.asos = [
+            {"tm": self.base, "stn_id": "112", "temp": 21.0, "visibility": 3000}
+        ]
+        self.air = [
+            {"tm": self.base, "station_code": "823632", "pm25": 10.0, "pm10": 20.0}
+        ]
         self.marine = [
             {
                 "tm": self.base,
@@ -50,6 +81,28 @@ class LiveCollectionTests(unittest.TestCase):
         live.validate_records(
             [{"tm": self.base, "pm25": None, "pm10": 0}], self.now, "TEST"
         )
+
+    def test_missing_current_baseline_keeps_other_measurements_and_is_retryable(self):
+        self.air[0]["pm25"] = None
+        with patch.object(live, "collect_asos", return_value=self.asos), patch.object(
+            live, "collect_airkorea", return_value=self.air
+        ), patch.object(live, "collect_marine", return_value=self.marine):
+            result = live.refresh_observations("112")
+        self.assertEqual(result["errors"]["AIRKOREA"], "BASELINE_MISSING")
+        self.assertEqual(result["observations"]["AIRKOREA"][0]["pm10"], 20)
+        self.assertIn("AIRKOREA", result["retryable_sources"])
+
+    def test_phase_timeout_discards_pending_results_and_returns_partial_state(self):
+        with patch.object(live, "collect_asos", return_value=self.asos), patch.object(
+            live, "collect_airkorea", return_value=self.air
+        ), patch.object(live, "collect_marine", return_value=self.marine), patch.object(
+            live, "wait", side_effect=lambda futures, timeout: (set(), set(futures))
+        ):
+            result = live.refresh_observations("112")
+        self.assertTrue(
+            all(reason == "TIMEOUT" for reason in result["errors"].values())
+        )
+        self.assertEqual(len(result["errors"]), 5)
 
     def test_air_future_rows_are_excluded_without_replacing_real_observations(self):
         future = self.now.replace(tzinfo=None) + timedelta(hours=1)
@@ -93,11 +146,11 @@ class LiveCollectionTests(unittest.TestCase):
         ), patch.object(live, "collect_marine", return_value=self.marine), patch.object(
             main, "get_connection"
         ) as connect:
-            with self.assertRaises(live.CollectionError) as raised:
-                live.refresh_observations("112")
+            result = live.refresh_observations("112")
         connect.assert_not_called()
-        self.assertEqual(raised.exception.source, "AIRKOREA")
-        self.assertNotIn("secret", str(raised.exception))
+        self.assertEqual(result["errors"]["AIRKOREA"], "COLLECTION_FAILED")
+        self.assertEqual(result["observations"]["ASOS"], self.asos)
+        self.assertNotIn("secret", str(result))
 
     def test_no_aligned_source_does_not_ingest(self):
         with patch.object(live, "collect_asos", return_value=self.asos), patch.object(
@@ -107,9 +160,10 @@ class LiveCollectionTests(unittest.TestCase):
         ), patch.object(live, "collect_marine", return_value=self.marine), patch.object(
             main, "get_connection"
         ) as connect:
-            with self.assertRaises(live.CollectionError):
-                live.refresh_observations("112")
+            result = live.refresh_observations("112")
         connect.assert_not_called()
+        self.assertEqual(result["observations"]["AIRKOREA"], [])
+        self.assertIn("AIRKOREA", result["retryable_sources"])
 
     def test_forecast_failure_is_reported_without_database(self):
         with patch.object(live, "collect_asos", return_value=self.asos), patch.object(
@@ -118,12 +172,55 @@ class LiveCollectionTests(unittest.TestCase):
             main, "get_connection"
         ), patch.object(
             live,
-            "collect_forecasts",
-            side_effect=live.ForecastError("FORECAST", "TARGET_MISSING_OR_STALE"),
+            "collect_air",
+            side_effect=live.CollectionError("AIRKOREA_FORECAST", "EMPTY_DATA"),
+        ):
+            result = live.refresh_observations("112")
+        self.assertEqual(result["errors"]["AIRKOREA_FORECAST"], "EMPTY_DATA")
+        self.assertTrue(
+            math.isnan(result["forecast_inputs"][3]["values"]["future_fcst_pm25_grade"])
+        )
+
+    def test_retry_calls_only_failed_source_and_preserves_successful_data(self):
+        with patch.object(
+            live, "collect_asos", return_value=self.asos
+        ) as asos, patch.object(
+            live, "collect_airkorea", return_value=self.air
+        ) as air, patch.object(
+            live, "collect_marine", side_effect=TimeoutError()
+        ):
+            first = live.refresh_observations("112")
+            with patch.object(
+                live, "collect_marine", return_value=self.marine
+            ) as marine, patch.object(
+                live, "collect_kma", side_effect=AssertionError("must not refetch")
+            ), patch.object(
+                live, "collect_air", side_effect=AssertionError("must not refetch")
+            ):
+                second = live.refresh_observations(
+                    "112", collection_id=first["id"], retry_source="TIDE_OBSERVATORY"
+                )
+        self.assertEqual(asos.call_count, 1)
+        self.assertEqual(air.call_count, 1)
+        marine.assert_called_once()
+        self.assertEqual(first["fetched_at"]["ASOS"], second["fetched_at"]["ASOS"])
+        self.assertEqual(second["errors"], {})
+        for station, horizons, source, reason in (
+            ("102", (3, 6, 9, 12), "TIDE_OBSERVATORY", "RETRY_CONTEXT_MISMATCH"),
+            ("112", (1, 2, 3, 4), "TIDE_OBSERVATORY", "RETRY_CONTEXT_MISMATCH"),
+            ("112", (3, 6, 9, 12), "ASOS", "SOURCE_NOT_RETRYABLE"),
         ):
             with self.assertRaises(live.CollectionError) as raised:
-                live.refresh_observations("112")
-        self.assertEqual(raised.exception.reason, "TARGET_MISSING_OR_STALE")
+                live.refresh_observations(
+                    station, horizons, collection_id=first["id"], retry_source=source
+                )
+            self.assertEqual(raised.exception.reason, reason)
+        live._sessions[first["id"]]["created"] -= live.SESSION_SECONDS
+        with self.assertRaises(live.CollectionError) as raised:
+            live.refresh_observations(
+                "112", collection_id=first["id"], retry_source="TIDE_OBSERVATORY"
+            )
+        self.assertEqual(raised.exception.reason, "COLLECTION_EXPIRED")
 
     def test_marine_mapping_and_missing_values(self):
         payload = {
@@ -322,18 +419,30 @@ class DashboardLatestTests(unittest.TestCase):
         connect.assert_not_called()
         predict.assert_not_called()
 
-    def test_collected_input_mismatch_stops_model(self):
-        self.marine["tm"] -= timedelta(days=1)
+    def test_missing_marine_keeps_current_and_degraded_predictions(self):
+        self.collection["observations"]["TIDE_OBSERVATORY"] = []
+        self.collection["model_input_observed_at"]["TIDE_OBSERVATORY"] = None
+        self.collection["errors"] = {"TIDE_OBSERVATORY": "COLLECTION_FAILED"}
         with patch.object(
             main, "refresh_observations", return_value=self.collection
         ), patch.object(
             main, "get_connection", return_value=self.connection()
         ), patch.object(
-            main, "predict_visibility_pm"
+            main,
+            "predict_visibility_pm",
+            return_value={"visibility_km": 22.0, "pm25": 11.0, "pm10": 22.0},
         ) as predict:
             response = self.client.get("/api/v1/stations/112/dashboard")
-        self.assertEqual(response.status_code, 503)
-        predict.assert_not_called()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"]["current"]["temperature_c"], 21)
+        self.assertTrue(
+            all(
+                p["status"] == "degraded"
+                for p in response.json()["data"]["forecast_timeline"]
+            )
+        )
+        self.assertIsNone(response.json()["data"]["mission_evaluation"]["passed"])
+        self.assertEqual(predict.call_count, 4)
 
     def test_nowcast_preserves_missing_hour_slots(self):
         self.collection["observations"]["AIRKOREA"] = [self.air]
@@ -363,8 +472,14 @@ class DashboardLatestTests(unittest.TestCase):
             main, "predict_visibility_pm", side_effect=ValueError("test failure")
         ):
             response = self.client.get("/api/v1/stations/112/dashboard")
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["code"], "FORECAST_FAILED")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(
+            all(
+                p["status"] == "unavailable"
+                for p in response.json()["data"]["forecast_timeline"]
+            )
+        )
+        self.assertEqual(response.json()["data"]["current"]["temperature_c"], 21)
 
     def test_historical_query_does_not_collect_or_ingest(self):
         with patch.object(main, "refresh_observations") as collect, patch.object(
@@ -393,8 +508,14 @@ class DashboardLatestTests(unittest.TestCase):
             return_value={"visibility_km": float("nan"), "pm25": 10.0, "pm10": 20.0},
         ):
             response = self.client.get("/api/v1/stations/112/dashboard")
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["code"], "FORECAST_FAILED")
+        self.assertEqual(response.status_code, 200, response.text)
+        points = response.json()["data"]["forecast_timeline"]
+        self.assertTrue(
+            all(
+                p["visibility_pred_km"] is None and p["pm25_pred_ug_m3"] == 10
+                for p in points
+            )
+        )
 
     def test_invalid_request_does_not_collect_or_write(self):
         with patch.object(main, "refresh_observations") as collect:
@@ -404,6 +525,86 @@ class DashboardLatestTests(unittest.TestCase):
             ):
                 self.assertIn(self.client.get(url).status_code, (404, 422))
         collect.assert_not_called()
+
+    def test_retry_http_route_preserves_good_sources_and_recovers_only_marine(self):
+        weather = [
+            dict(
+                base_time_kst=self.base - timedelta(hours=1),
+                fcst_time_kst=self.base + timedelta(hours=h),
+                tmp_1h=17,
+                reh=80,
+                wsd=4,
+                vec=270,
+                pcp_1h=0,
+                pop=10,
+                pty=0,
+                sky=3,
+            )
+            for h in range(1, 49)
+        ]
+        air_forecast = [
+            dict(
+                announce_time=self.base - timedelta(hours=1),
+                target_date=(self.base + timedelta(days=d)).date(),
+                fcst_pm25_grade=1,
+            )
+            for d in range(3)
+        ]
+        with patch.object(
+            live, "collect_asos", return_value=[self.asos]
+        ) as asos, patch.object(
+            live,
+            "collect_airkorea",
+            return_value=self.collection["observations"]["AIRKOREA"],
+        ) as air, patch.object(
+            live, "collect_marine", side_effect=[TimeoutError(), [self.marine]]
+        ) as marine, patch.object(
+            live, "collect_kma", return_value=weather
+        ) as kma, patch.object(
+            live, "collect_air", return_value=air_forecast
+        ) as air_pred, patch.object(
+            main, "get_connection", side_effect=AssertionError("DB must not be used")
+        ) as db, patch.object(
+            main,
+            "fetch_realtime_weather",
+            side_effect=AssertionError("must not fetch extra API"),
+        ):
+            first = self.client.get("/api/v1/stations/112/dashboard")
+            self.assertEqual(first.status_code, 200, first.text)
+            data = first.json()["data"]
+            second = self.client.get(
+                "/api/v1/stations/112/dashboard",
+                params={
+                    "collection_id": data["meta"]["collection"]["id"],
+                    "retry_source": "TIDE_OBSERVATORY",
+                },
+            )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["data"]["meta"]["collection"]["errors"], {})
+        self.assertEqual(data["current"], second.json()["data"]["current"])
+        self.assertEqual(marine.call_count, 2)
+        for call in (asos, air, kma, air_pred):
+            self.assertEqual(call.call_count, 1)
+        db.assert_not_called()
+
+    def test_missing_asos_keeps_air_measurements_and_pm_predictions(self):
+        self.collection["observations"]["ASOS"] = []
+        self.collection["errors"] = {"ASOS": "TIMEOUT"}
+        self.collection["model_input_observed_at"]["ASOS"] = None
+        with patch.object(main, "refresh_observations", return_value=self.collection):
+            response = self.client.get("/api/v1/stations/112/dashboard")
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertIsNone(data["current"]["observed_at"])
+        self.assertIsNone(data["current"]["visibility_km"])
+        self.assertEqual(data["current"]["pm25_ug_m3"], 10)
+        self.assertEqual(data["meta"]["model"]["origin_at"], self.iso)
+        self.assertTrue(
+            all(
+                p["visibility_pred_km"] is None and p["pm25_pred_ug_m3"] is not None
+                for p in data["forecast_timeline"]
+            )
+        )
 
 
 if __name__ == "__main__":

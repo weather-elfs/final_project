@@ -139,8 +139,62 @@ class TunedModelTests(unittest.TestCase):
                 self.inputs()
         self.forecast = original
         self.air["pm25_ug_m3"] = None
-        with self.assertRaises(ValueError):
-            self.inputs()
+        result = model.predict_visibility_pm(
+            "112",
+            self.origin,
+            3,
+            self.asos,
+            self.air,
+            self.marine,
+            self.history,
+            self.forecast,
+        )
+        self.assertIsNone(result["pm25"])
+        self.assertTrue(math.isfinite(result["visibility_km"]))
+        self.assertTrue(math.isfinite(result["pm10"]))
+        self.assertIn("pm25", result["unavailable_targets"])
+
+    def test_missing_forecast_and_marine_still_predict_without_fabricating_inputs(self):
+        self.forecast = fc.match_forecasts(
+            [], [], self.origin, [3], allow_missing=True
+        )[3]
+        self.marine = dict.fromkeys(self.marine)
+        result = model.predict_visibility_pm(
+            "112",
+            self.origin,
+            3,
+            self.asos,
+            self.air,
+            self.marine,
+            self.history,
+            self.forecast,
+        )
+        self.assertTrue(all(math.isfinite(result[t]) for t in model.TARGETS))
+        self.assertIn("future_fcst_pm25_grade", result["missing_features"])
+        self.assertIn("sea_temp", result["missing_features"])
+
+    def test_one_target_model_failure_does_not_hide_other_predictions(self):
+        models, metadata = model.load_forecast_model()
+        broken = MagicMock()
+        broken.predict.side_effect = ValueError("test failure")
+        with patch.object(
+            model,
+            "load_forecast_model",
+            return_value=({**models, "pm25": broken}, metadata),
+        ):
+            result = model.predict_visibility_pm(
+                "112",
+                self.origin,
+                3,
+                self.asos,
+                self.air,
+                self.marine,
+                self.history,
+                self.forecast,
+            )
+        self.assertIsNone(result["pm25"])
+        self.assertTrue(math.isfinite(result["visibility_km"]))
+        self.assertTrue(math.isfinite(result["pm10"]))
 
     def test_predictions_restore_log_residual_using_training_sigma(self):
         inputs = self.inputs()
@@ -319,11 +373,8 @@ class ForecastParserTests(unittest.TestCase):
                 fcst_pm25_grade=1,
             )
         ]
-        with patch.object(fc, "collect_kma", return_value=kma), patch.object(
-            fc, "collect_air", return_value=air
-        ):
-            with self.assertRaises(fc.ForecastError):
-                fc.collect_forecasts("112", origin, [3, 6])
+        with self.assertRaises(fc.ForecastError):
+            fc.match_forecasts(kma, air, origin, [3, 6])
 
 
 if __name__ == "__main__":
