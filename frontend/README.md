@@ -17,6 +17,28 @@ pnpm storybook
 pnpm build-storybook
 ```
 
+### 로컬 백엔드 로그 확인 (PowerShell / UTF-8)
+
+현재 로컬 백엔드는 백그라운드로 실행하며 표준 출력은 `stdout.log`, 시작·오류 출력은
+`stderr.log`에 저장한다. 아래는 2026-10-26 실행 세션의 경로이며, 재실행할 때는
+로그를 저장하도록 지정한 실제 폴더로 바꾼다. 로그가 깨지지 않도록 `-Encoding UTF8`을 명시한다.
+
+```powershell
+$backendLogDir = Join-Path $env:TEMP 'codex-backend-aqi-2c29f0281f0449dea238e45eddbcbd7e'
+Get-Content -LiteralPath (Join-Path $backendLogDir 'stdout.log') -Encoding UTF8 -Tail 50 -Wait
+```
+
+`-Wait`은 새 로그를 계속 표시하며 `Ctrl+C`로 조회만 종료한다. 백엔드 서버는 종료되지 않는다.
+같은 창에서 로그 조회를 종료한 뒤 시작·오류 출력으로 전환하려면 다음 명령을 실행한다.
+
+```powershell
+Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 -Tail 50 -Wait
+```
+
+`[DB 적재 완료]`와 해당 `/api/v1/stations/.../dashboard` 요청의 HTTP 상태를 함께 확인한다.
+`/api/health`의 200 응답만으로 실제 수집·예측 성공을 판단하지 않는다. 이 경로는 로컬
+임시 폴더이며 Docker 배포 환경의 로그 위치·조회 명령과는 다르다.
+
 ## API 기준
 
 - [BE–FE 연동 API 명세서 v0.4 (2026-09-30)](https://docs.google.com/document/d/1zjBbNEa1c2HuNsfqGURhRHMnJt8upEdP/edit?rtpof=true&tab=t.0)
