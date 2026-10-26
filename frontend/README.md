@@ -24,7 +24,7 @@ pnpm build-storybook
 로그를 저장하도록 지정한 실제 폴더로 바꾼다. 로그가 깨지지 않도록 `-Encoding UTF8`을 명시한다.
 
 ```powershell
-$backendLogDir = Join-Path $env:TEMP 'codex-backend-memory-67538cd7955446408ed546e8813c82bf-v4'
+$backendLogDir = Join-Path $env:TEMP 'codex-backend-partial-final-f220e78b617449e99c4207a767a33d96'
 Get-Content -LiteralPath (Join-Path $backendLogDir 'stdout.log') -Encoding UTF8 -Tail 50 -Wait
 ```
 
@@ -45,6 +45,50 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 
 
 ### 최신 관측 수집·예측 조회 (2026-10-26)
 
+#### 실제 사용 모델과 실행 경로
+
+현재 5174에서 사용하는 서버는 **`feature/backend` 브랜치의 `backend.main:app`**이다.
+실행 경로는 다음과 같다.
+
+```text
+프론트 127.0.0.1:5174 /api/*
+  → Vite 프록시 → 127.0.0.1:8000
+  → backend/main.py:station_dashboard
+  → backend/model_predict.py:predict_visibility_pm
+  → backend/models/forecast_tuned/ 안의 완성 모델 3개
+```
+
+| 모델 파일 (`backend/models/forecast_tuned/` 기준) | 출력 |
+| --- | --- |
+| `cb_tuned_visibility_km.cbm` | 시정(km) |
+| `cb_tuned_pm25.cbm` | PM2.5(µg/m³) |
+| `cb_tuned_pm10.cbm` | PM10(µg/m³) |
+
+세 모델은 전달받은 `최종모델.zip`에서 원본 그대로 추출했으며, 2026-10-26에 ZIP과
+바이트 동일성을 확인했다. 추가 학습·튜닝은 수행하지 않았다. `forecast_tuned/metadata.json`은
+입력 피처 순서·원본 해시·예측 시간별 출력 복원 계수를 기록한다. 모델 출력은
+`expm1(log1p(현재 관측값) + 모델 출력 × sigma[h])`로 원 단위로 복원한다.
+
+`backend/models/catboost_48h_multioutput.cbm`은 기존 모델이며 이 실행 경로에서는 로드하지 않는다.
+**프론트 작업 폴더에도 구버전 `backend/`가 남아 있으므로, 백엔드는 아래 별도 작업 폴더에서 실행한다.**
+
+| 현재 로컬 역할 | 브랜치 | 작업 폴더 |
+| --- | --- | --- |
+| 프론트 소스·Vite | `feature/frontend` | `C:\Users\INA\Documents\workspace\final-project\frontend` |
+| 실제 API 서버 소스 | `feature/backend` | `C:\Users\INA\Documents\workspace\final-project\_workspace\backend-live-request` |
+
+기존 API 키가 프로세스 환경변수에 주입된 PowerShell에서 실행한다. DB 환경변수는 일반 실시간 조회에 필요하지 않다.
+
+```powershell
+Set-Location 'C:\Users\INA\Documents\workspace\final-project\_workspace\backend-live-request'
+$env:PYTHONIOENCODING = 'utf-8'
+& 'C:\Users\INA\Documents\workspace\final-project\.venv\Scripts\python.exe' -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+이 절대 경로는 현재 로컬 작업 배치다. 다른 PC·Docker에서는 `feature/backend`를 체크아웃한
+저장소 루트에서 같은 `backend.main:app`을 실행하고 `models/forecast_tuned/`와 메타데이터를 함께 포함한다.
+실제 응답의 `data.meta.model.name = catboost_observation_forecast_tuned`로 모델 종류를 확인한다.
+
 브랜치 동기화 확인일: 2026-10-26. `feature/frontend`에는 백엔드 PR #6이 병합된
 `develop`의 `0da333f`를 반영했다. 이 기준의 백엔드 소스와, 이후 수정한 실시간 수집
 백엔드는 구분한다. **실시간 관측·예보 수집과 튜닝 모델을 사용하는 백엔드 브랜치는
@@ -59,17 +103,40 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 
 ASOS 최근 25개 시간대와 AirKorea 실측 시계열을 사용하며 결측 시간을 임의 보간하지 않는다.
 대기질 예보는 `ArpltnInforInqireSvc/getMinuDustFrcstDspth`의 인천 PM2.5 예보 등급을 사용한다.
 조회 전 관측소 상태는 `UNKNOWN`이며, 선택한 관측소의 지도 상태는 실제 대시보드 응답으로 갱신한다.
-이 요청만 최대 60초를 기다리며, 실패하면
-이전 관측·예측을 지우고 서버 오류를 표시한다. 다른 API의 제한 시간은 변경하지 않는다.
+이 요청만 최대 60초를 기다린다. 일부 API가 실패해도 받은 관측과 가능한 예측을 표시한다.
+전체 요청의 통신 오류가 발생하면 같은 관측소·예측 간격의 기존 결과를 시각 정보와 함께 유지한다.
+조회 조건이 다른 결과를 새 조건의 데이터로 표시하지 않는다. 다른 API의 제한 시간은 변경하지 않는다.
 
 `current.observed_at`은 ASOS 관측 시각, `source_status[].observed_at`은 출처별 관측 시각이다.
+예보 출처는 관측 시각 대신 `issued_at`(발표)·`collected_at`(수집)을 따로 표시한다.
+`meta.model.origin_at`은 예측 기준 시각이며, ASOS 누락 시에도 현재 관측 시각으로 대신 표시하지 않는다.
 `meta.collection.requested_at` / `collected_at`은 수집 요청·수집 완료 시각이며,
 `meta.collection.model_input_observed_at`으로 실제 모델 입력의 출처별 시각을 확인할 수 있다.
 최신 자료는 기관이 공개한 가장 최근 관측을 뜻하며, 요청한 초의 관측을 의미하지 않는다.
 `meta.collection.storage = memory`, `collected_rows`로 메모리 처리와 출처별 수집 건수를 확인한다.
-자료는 응답 이후 영구 저장되지 않는다. `as_of` 과거 조회와 인천 `mock=true`는 기존 DB 경로이므로
+자료는 영구 저장하지 않고, 출처별 재시도를 위해 한 프로세스의 메모리에 최대 10분·64개 조회를 보관한다.
+`as_of` 과거 조회와 인천 `mock=true`는 기존 DB 경로이므로
 DB 없는 실행에서는 파라미터를 생략하고 실제 API 기본값(`mock=false`)을 사용한다.
-외부 API 장애·미발표 예보는 DB 없이도 조회 실패를 일으킬 수 있다.
+외부 API 장애·미발표 예보는 해당 출처와 시점에 누락으로 표시한다.
+
+### 부분 성공과 출처별 재시도
+
+통신 오류 안내는 지도 위에 겹치지 않고 대시보드 상단에 표시하며 닫기·재시도를 제공한다.
+긴 오류 메시지와 요청 ID는 접힌 상세 영역에서 확인한다. 기존 자료가 있는 갱신 실패 안내는
+8초 뒤 자동으로 닫히고, 상세 내용을 펼쳐 읽는 동안에는 자동 닫기를 멈춘다.
+최초 조회 실패 안내와 출처별 부분 누락 상태는 자동으로 숨기지 않는다.
+
+- 응답은 `PARTIAL_SUCCESS`로 사용 가능한 관측과 4개 예측 시점을 유지한다.
+- 예측 입력이 부족하면 모델이 지원하는 결측값으로 계산하며, 시점별 `status`, `missing_sources`,
+  `missing_features`, `unavailable_targets`로 누락 상태를 표시한다. 없는 값을 0이나 다른 시점의 예보로 채우지 않는다.
+- 현재 시정·PM 기준값이 없는 항목이나 모델 오류가 발생한 항목은 예측값을 `null`로 반환한다.
+  일부 입력이 누락되거나 시점별 예측이 불완전하면 임무 판정은 대기한다. 결측 상태의 정확도는 별도 평가가 필요하다.
+- `meta.collection.id`와 원래 조회 조건을 유지하고 `retry_source`로 실패한 출처만 다시 요청한다.
+  성공한 출처의 `fetched_at`과 관측값은 유지하며, 재시도 중에도 표를 숨기지 않는다.
+- 재시도 대상은 `ASOS`, `AIRKOREA`, `TIDE_OBSERVATORY`, `KMA_FORECAST`, `AIRKOREA_FORECAST`다.
+  응답의 `errors`·`retryable_sources`를 기준으로 버튼을 표시한다.
+- 보관 만료·서버 재시작·다른 워커로 요청되어 조회 ID가 없으면 409를 반환한다. 이때 현재 관측 갱신으로 전체 조회를 실행한다.
+  여러 워커·컨테이너를 사용하면 같은 프로세스로 재시도 요청이 가도록 라우팅해야 한다.
 
 `meta.model.name = catboost_observation_forecast_tuned`는 전달된 최종 ZIP의 튜닝형을 뜻한다.
 `meta.forecasts[]`에는 각 예측 대상시각의 실제 예보 입력값, `kma_issued_at`,
