@@ -13,3 +13,4 @@ export const ForecastReady: Story = { args: { ...defaultArgs, values: { stationI
 export const PartialData: Story = { args: { ...defaultArgs, dashboard: { ...dashboard, meta: { ...dashboard.meta, partial: true }, current: { ...dashboard.current, pm25UgM3: null } } } };
 export const Loading: Story = { args: { ...defaultArgs, loading: true } };
 export const Error: Story = { args: { ...defaultArgs, dashboard: null, error: '관측 데이터를 불러오지 못했습니다. (요청 ID: story-error)' } };
+export const RefreshError: Story = { args: { ...defaultArgs, error: '최신 자료 갱신 요청에 실패했습니다. (요청 ID: story-refresh-error)' } };

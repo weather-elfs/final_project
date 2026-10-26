@@ -11,6 +11,7 @@ import ForecastPanel from './components/ForecastPanel';
 import MissionConditionsForm from './components/MissionConditionsForm';
 import VisibilitySummary from './components/VisibilitySummary';
 import CollectionStatus from './components/CollectionStatus';
+import RequestErrorNotice from './components/RequestErrorNotice';
 import WeatherMap from './components/WeatherMap';
 import { buildFogCoverageBounds } from './fogDistribution';
 import { buildForecastFogDemoFrames } from './forecastFog';
@@ -288,10 +289,7 @@ export default function DashboardView({
 
           <main className='dashboard-main'>
             {error && (
-              <div className='page-error' role='alert'>
-                <strong>데이터를 불러오지 못했습니다.</strong>
-                <span>{error}</span>
-              </div>
+              <RequestErrorNotice key={error} message={error} hasData={Boolean(dashboard)} busy={loading || Boolean(retryingSource)} onRetry={config.stations.length ? onRefresh : undefined} />
             )}
             <CollectionStatus dashboard={dashboard} loading={loading} retryingSource={retryingSource} onRetrySource={onRetrySource} />
             <div className='dashboard-grid' aria-busy={loading}>
