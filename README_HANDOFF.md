@@ -2,6 +2,38 @@
 
 ## Latest-data request flow (2026-10-26)
 
+### 실행 서버와 모델 경로 (2026-10-26 확인)
+
+5174 프론트의 `/api/*`는 8000 서버로 프록시한다. 실제 백엔드는 `feature/backend` 브랜치이며,
+현재 로컬 실행 루트는 `C:\Users\INA\Documents\workspace\final-project\_workspace\backend-live-request`다.
+`feature/frontend` 작업 폴더에 남은 `backend/`는 기존 버전이므로 실행 폴더를 구분해야 한다.
+
+```text
+backend.main:app → station_dashboard → predict_visibility_pm → load_forecast_model
+  → backend/models/forecast_tuned/cb_tuned_visibility_km.cbm
+  → backend/models/forecast_tuned/cb_tuned_pm25.cbm
+  → backend/models/forecast_tuned/cb_tuned_pm10.cbm
+```
+
+세 파일은 각각 시정(km), PM2.5(µg/m³), PM10(µg/m³)을 예측한다.
+`catboost_48h_multioutput.cbm`은 기존 모델이며 이 경로에서는 사용하지 않는다.
+2026-10-26 원본 `최종모델.zip`의 세 모델과 바이트 동일성, 메타데이터의 ZIP 해시 일치를 확인했다.
+`forecast_tuned`는 완성 모델을 추출한 폴더이며 추가 학습·튜닝은 하지 않았다.
+`metadata.json`은 입력 순서·모델 해시와 원본 노트북 방식으로 복원한 출력 계수 `sigma[h]`를 보관한다.
+출력 복원식은 `expm1(log1p(현재값) + 모델 출력 × sigma[h])`다.
+
+기존 API 키를 프로세스 환경변수로 주입한 PowerShell에서 실행한다.
+
+```powershell
+Set-Location 'C:\Users\INA\Documents\workspace\final-project\_workspace\backend-live-request'
+$env:PYTHONIOENCODING = 'utf-8'
+& 'C:\Users\INA\Documents\workspace\final-project\.venv\Scripts\python.exe' -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
+
+다른 PC·Docker에서는 이 로컬 절대 경로 대신 `feature/backend` 체크아웃 루트에서 실행한다.
+이미지에 `backend/models/forecast_tuned/` 전체를 포함해야 하며, 일반 실시간 조회는 DB 없이 동작한다.
+응답의 `data.meta.model.name = catboost_observation_forecast_tuned`로 모델 종류를 확인한다.
+
 AQI responsibility (verified 2026-10-26): the backend computes the PM2.5/PM10
 NowCast from actual hourly observations, retaining missing hourly slots. Invalid
 concentrations do not count toward the two-of-three completeness requirement.
@@ -37,11 +69,16 @@ python -m backend.import_tuned_models "C:\path\to\최종모델.zip"
 - The tuned output is not a final concentration: `result = expm1(log1p(current) + residual × sigma[h])`.
   Clamp below at zero; visibility additionally uses the original train-target maximum from metadata.
 - PM1 and wave height/period are currently unavailable and remain NaN as supported by CatBoost;
-  they are never filled with zero or stale observations. Missing current visibility/PM baselines abort prediction.
+  they are never filled with zero or stale observations. A missing current baseline disables only
+  that target; the other models still run. Model errors are also isolated by target and horizon.
 - `meta.model` identifies this model, its inverse transform and missing input features.
+  `meta.model.origin_at` is the prediction origin even if ASOS is unavailable; it is not
+  fabricated as `current.observed_at`, which remains null when ASOS is missing.
   `meta.forecasts[]` gives each horizon's actual numeric forecast inputs, valid time and separate
   KMA/AirKorea issue times.
-- Missing/old/incorrectly matched live forecasts return HTTP 503 `LATEST_DATA_UNAVAILABLE`.
+- Missing/old/incorrectly matched live forecasts become NaN inputs for that source/horizon.
+  Available predictions are returned with `status=degraded`, `missing_sources`, `missing_features`
+  and `unavailable_targets`. Nonfinite values are serialized as JSON null, never zero.
   `as_of` does not collect or write: historical predictions require matching historical forecast rows already in DB.
 
 Normal dashboard requests without `as_of` now collect the selected station's ASOS,
@@ -55,12 +92,15 @@ the frontend uses the selected station's actual dashboard status after collectio
 - Collectors: `backend/live_observations.py`, `backend/forecast_inputs.py`. Reuse the existing ASOS/AirKorea collectors and ingestion validators.
 - Required live server environment: `KMA_AUTH_KEY` (fallback `KMA_API_KEY`),
   `AIRKOREA_API_KEY` (fallback `DATA_API_KEY`), and `DATA_API_KEY` for KHOA.
-  Keep `KMA_API_KEY` for weather labels. Keys must have the relevant API permissions.
+  Weather labels reuse collected KMA forecast rows, so source-only retries make no extra label API call.
+  Keys must have the relevant API permissions.
 - KHOA: [조위관측소 최신 관측데이터](https://www.data.go.kr/data/15155508/openapi.do),
   `dtRecent/GetDTRecentApiService`. The approved hourly query uses `obsCode=DT_0001`
   (인천) or `IE_0062` (옹진소청초); the latter retains DB/model name `소청초`.
   Existing station mapping is preserved: 102 → 소청초; 112/201 → 인천.
-- Request data is discarded after responding. There is no durable collection history in this mode.
+- There is no durable collection history. For source-only retries, up to 64 request snapshots are
+  retained for 600 seconds in this process's memory. A per-snapshot lock serializes retries.
+  Successful sources are reused and retain their original `fetched_at` and observation timestamps.
 - All sources must have observations at or before the ASOS base time, no older
   than two hours at collection start. Future/nonfinite/invalid measurements are rejected.
   AirKorea may publish a future hourly row with only some pollutants; all rows after the
@@ -68,8 +108,17 @@ the frontend uses the selected station's actual dashboard status after collectio
   KHOA timeout/network/HTTP 429 or 5xx failures are retried once; each attempt times out after 10 seconds.
   Collected input times are rechecked before model execution. Null instrument values
   remain null; the existing model's missing-value handling is unchanged.
-- Collection/input mismatch returns HTTP 503 `LATEST_DATA_UNAVAILABLE`;
-  model failure returns HTTP 503 `FORECAST_FAILED`. Old observations are not substituted.
+- A source failure is returned in `meta.collection.errors` and `retryable_sources` alongside
+  successful observations and possible forecasts in HTTP 200 `PARTIAL_SUCCESS`.
+  Incomplete predictions do not pass mission evaluation (`INPUT_INCOMPLETE`). Missing values are
+  not substituted with old observations, adjacent forecasts or zeros. Forecast accuracy with missing
+  inputs has not been evaluated.
+  A received row with a missing current visibility/PM baseline remains visible and makes
+  that source retryable (`BASELINE_MISSING`). Source status `partial` distinguishes incomplete
+  returned data from a wholly missing source. Forecast source times use `issued_at` and
+  `collected_at`, not an observation timestamp.
+- Observation and forecast collection phases each wait up to 25 seconds; pending results are
+  marked `TIMEOUT` and discarded even if the network call finishes later.
 - `as_of` remains a read-only historical query. The existing Incheon `mock=true`
   response bypasses collection. These legacy paths still require DB credentials/data;
   a DB-free deployment should omit `as_of` and use `mock=false`.
@@ -81,9 +130,19 @@ the frontend uses the selected station's actual dashboard status after collectio
 - Existing DB timestamps remain naive KST for compatibility; API timestamps include `+09:00`.
   This change does not retrain or validate forecast accuracy.
 
-Live logs contain `[API 수집 완료]`, `[예측 완료]` and the dashboard request HTTP status.
-`/api/health` alone does not verify external collection or prediction. External API timeouts,
-missing observations and unpublished forecast dates can still fail the request without DB involvement.
+Retry the same dashboard route with the original station/interval/mission and
+`collection_id=<meta.collection.id>&retry_source=<failed source>`. Only that API is called;
+the response is rebuilt from the updated snapshot. Allowed sources are ASOS, AIRKOREA,
+TIDE_OBSERVATORY, KMA_FORECAST and AIRKOREA_FORECAST. Invalid parameter pairs return 422;
+expired/missing snapshots, mismatched conditions and already-successful sources return 409.
+Expiration, eviction, a process restart or a different worker requires a new full dashboard request.
+Multiple workers/replicas require routing retries to the same process; no distributed cache is used.
+When ASOS recovery changes the prediction origin, all retained rows are rematched by that origin;
+an unavailable forecast time is marked missing instead of mixing incompatible releases.
+
+Live logs contain `[API 수집 완료]`, `[예측 완료]`, `API 부분 실패` and HTTP status.
+`/api/health` alone does not verify external collection or prediction. A 200 with partial data
+does not imply that every source, target or horizon is complete.
 
 The 2026-10-23 package notes below describe the old snapshot. Its CSV loop is optional
 legacy tooling and is not used by the latest-data dashboard request.
