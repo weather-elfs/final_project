@@ -57,6 +57,15 @@ python -m backend.import_tuned_models "C:\path\to\최종모델.zip"
 - Sources: approved data.go.kr `VilageFcstInfoService_2.0/getVilageFcst` (weather),
   AirKorea `ArpltnInforInqireSvc/getMinuDustFrcstDspth` (Incheon PM2.5 grade).
   Both use existing `DATA_API_KEY`; AirKorea may use `AIRKOREA_API_KEY` instead.
+  If weather collection or validation fails, retry the same release and grid through
+  KMA APIHub `VilageFcstInfoService_2.0/getVilageFcst`. APIHub uses
+  the existing `KMA_API_KEY` (fallback: `KMA_AUTH_KEY`) and requires
+  the corresponding API usage approval. Observation credentials are unchanged.
+  The primary request has an 8-second pagination budget, and APIHub has 12 seconds,
+  within the existing 25-second collection phase. Both routes use the same field,
+  release-time, grid and value validation; no pages or releases are mixed.
+  If both fail, `KMA_FORECAST` remains missing and partial predictions are preserved.
+  Backend logs record `[기상청 예보 수신] 경로 DATA_GO_KR/KMA_APIHUB` without keys or URLs.
 - Model PIT-grid mapping follows the provided collection pipeline: 102 → (21,136)/백령면,
   112 → (54,125)/동인천동, 201 → (51,130)/불은면. This is separate from the legacy weather-label helper.
 - The ASOS window is now 25 hourly points (origin minus 24 hours through origin). The model
