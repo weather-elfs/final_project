@@ -76,7 +76,7 @@ def collect_asos(station_id, now):
     end = now.replace(minute=0, second=0, microsecond=0)
     rows = asos_collector.fetch_period_data(
         int(station_id),
-        (end - timedelta(hours=24)).strftime("%Y%m%d%H%M"),
+        (end - timedelta(hours=72)).strftime("%Y%m%d%H%M"),
         end.strftime("%Y%m%d%H%M"),
         key,
         max_retries=1,
@@ -381,6 +381,7 @@ def refresh_observations(
 def observation_history(observations, origin):
     """기존 DB의 정확한 시각 조인과 동일하게 결측 시간을 보간하지 않는다."""
     air = {row["tm"]: row for row in observations["AIRKOREA"]}
+    marine = {row["tm"]: row for row in observations.get("TIDE_OBSERVATORY", [])}
     return [
         {
             "tm": row["tm"],
@@ -389,9 +390,14 @@ def observation_history(observations, origin):
             ),
             "humidity": row.get("humidity"),
             "pressure": row.get("sea_press"),
+            "temperature": row.get("temp"),
+            "dewpoint": row.get("dew_point"),
+            "wind_speed": row.get("wind_speed"),
+            "precipitation": 0.0 if row.get("rainfall") is None else row["rainfall"],
+            "sea_temp": marine.get(row["tm"], {}).get("water_temp"),
             "pm25": air.get(row["tm"], {}).get("pm25"),
             "pm10": air.get(row["tm"], {}).get("pm10"),
         }
         for row in observations["ASOS"]
-        if origin - timedelta(hours=24) <= row["tm"] <= origin
+        if origin - timedelta(hours=72) <= row["tm"] <= origin
     ]

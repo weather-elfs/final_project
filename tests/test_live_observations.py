@@ -256,17 +256,22 @@ class LiveCollectionTests(unittest.TestCase):
         rows = live.observation_history(
             {
                 "ASOS": [
-                    {"tm": self.base - timedelta(hours=25), "visibility": 1000},
+                    {"tm": self.base - timedelta(hours=73), "visibility": 1000},
                     {"tm": self.base - timedelta(hours=1), "visibility": 2500},
                     {
                         "tm": self.base,
                         "visibility": None,
                         "humidity": 70,
                         "sea_press": 1010,
+                        "temp": 20,
+                        "dew_point": 14,
+                        "wind_speed": 2,
+                        "rainfall": 0.5,
                     },
                     {"tm": self.base + timedelta(hours=1), "visibility": 1000},
                 ],
                 "AIRKOREA": self.air,
+                "TIDE_OBSERVATORY": [{"tm": self.base, "water_temp": 19}],
             },
             self.base,
         )
@@ -276,6 +281,11 @@ class LiveCollectionTests(unittest.TestCase):
         self.assertEqual(rows[1]["pm25"], 10)
         self.assertEqual(rows[1]["pressure"], 1010)
         self.assertIsNone(rows[1]["visibility_km"])
+        self.assertEqual(rows[1]["temperature"], 20)
+        self.assertEqual(rows[1]["dewpoint"], 14)
+        self.assertEqual(rows[1]["sea_temp"], 19)
+        self.assertEqual(rows[1]["precipitation"], 0.5)
+        self.assertIsNone(rows[0]["sea_temp"])
 
 
 class DashboardLatestTests(unittest.TestCase):

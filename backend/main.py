@@ -19,6 +19,7 @@ from backend.live_observations import (
 from backend.model_predict import (
     METADATA_PATH,
     MODEL_PATHS,
+    MODEL_VERSION,
     predict_visibility_pm,
     read_model_history,
 )
@@ -1324,6 +1325,8 @@ def station_dashboard(
                     if is_mock
                     else {
                         "name": "catboost_observation_forecast_tuned",
+                        "version": MODEL_VERSION,
+                        "feature_count": 89,
                         "transform": "expm1(log1p(current) + predicted_residual * sigma[h])",
                         "missing_features": sorted(missing_features),
                         "origin_at": row["tm"].replace(tzinfo=KST).isoformat(),

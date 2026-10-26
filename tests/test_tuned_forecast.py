@@ -46,6 +46,11 @@ class TunedModelTests(unittest.TestCase):
                 pm10=20 - i / 10,
                 humidity=70 - i,
                 pressure=1013 - i,
+                temperature=20 - i,
+                dewpoint=14 - i / 2,
+                wind_speed=2 + i,
+                precipitation=1 if i == 2 else None,
+                sea_temp=19 - i / 10,
             )
             for i in range(25)
         ]
@@ -88,7 +93,14 @@ class TunedModelTests(unittest.TestCase):
     def test_original_models_and_feature_order_are_used(self):
         models, meta = model.load_forecast_model()
         self.assertEqual(set(models), set(model.TARGETS))
-        self.assertEqual(len(meta["features"]), 76)
+        self.assertEqual(len(meta["features"]), 89)
+        self.assertEqual(meta["version"], model.MODEL_VERSION)
+        self.assertEqual(meta["train_end_exclusive"], "2025-04-01")
+        self.assertTrue(
+            all(t["refit_sample_count"] == 3_136_858 for t in meta["targets"].values())
+        )
+        self.assertNotIn("pm1", meta["features"])
+        self.assertNotIn("extinction_coef", meta["features"])
         self.assertTrue(
             all(m.feature_names_ == meta["features"] for m in models.values())
         )
@@ -103,7 +115,6 @@ class TunedModelTests(unittest.TestCase):
         row = self.inputs().iloc[0]
         self.assertEqual(row.wind_dir, 90)
         self.assertAlmostEqual(row.wind_dir_sin, 1)
-        self.assertAlmostEqual(row.extinction_coef, 0.0999)
         self.assertAlmostEqual(row.lag_1h_visibility_km, 29.9, places=4)
         self.assertAlmostEqual(row.diff_3h_visibility_km, 0.3, places=4)
         self.assertAlmostEqual(row.min_24h_visibility_km, 27.7, places=4)
@@ -111,10 +122,53 @@ class TunedModelTests(unittest.TestCase):
         self.assertEqual(row.f_dtemp, -3)
         self.assertEqual(row.f_air_sea_diff, -2)
         self.assertAlmostEqual(row.f_dpd, 17 - model.dewpoint(17, 80), places=5)
-        self.assertTrue(math.isnan(row.pm1))
         self.assertTrue(math.isnan(row.buoy_wave_height))
         self.assertTrue(math.isnan(row.buoy_wave_period))
         self.assertEqual(row.precipitation, 0)
+
+    def test_low_visibility_trends_match_supplied_notebook(self):
+        row = self.inputs().iloc[0]
+        expected = {
+            "rain_3h": 1,
+            "rain_24h": 1,
+            "hours_since_rain": 2,
+            "chg3h_dewpoint_depression": 1.5,
+            "chg6h_dewpoint_depression": 3,
+            "chg6h_humidity": 6,
+            "chg3h_temperature": 3,
+            "chg6h_temperature": 6,
+            "chg3h_wind_speed": -3,
+            "chg1h_visibility_km": 0.1,
+            "chg6h_visibility_km": 0.6,
+            "chg3h_air_sea_diff": 2.7,
+            "min_6h_dpd": 3.5,
+            "humid90_6h": 0,
+            "min_6h_visibility_km": 29.5,
+        }
+        for field, value in expected.items():
+            with self.subTest(field=field):
+                self.assertAlmostEqual(row[field], value, places=4)
+
+    def test_humidity_count_preserves_missing_hours_and_rain_clock_needs_observation(
+        self,
+    ):
+        self.history[1]["humidity"] = 95
+        self.history[2]["humidity"] = None
+        self.history[3]["humidity"] = 90
+        self.history = [
+            r for r in self.history if r["tm"] != self.origin - timedelta(hours=6)
+        ]
+        self.assertEqual(self.inputs().iloc[0].humid90_6h, 2)
+        self.assertTrue(math.isnan(self.inputs().iloc[0].chg6h_temperature))
+        self.history[2]["precipitation"] = None
+        self.assertTrue(math.isnan(self.inputs().iloc[0].hours_since_rain))
+
+    def test_rain_clock_uses_three_day_history_but_sums_only_recent_hours(self):
+        self.history = [{"tm": self.origin - timedelta(hours=72), "precipitation": 3}]
+        row = self.inputs().iloc[0]
+        self.assertEqual(row.hours_since_rain, 72)
+        self.assertEqual(row.rain_24h, 0)
+        self.assertTrue(math.isnan(row.chg6h_visibility_km))
 
     def test_hour_48_uses_current_same_hour_not_future_data(self):
         self.forecast["valid_at"] = (
@@ -221,7 +275,8 @@ class TunedModelTests(unittest.TestCase):
             if maximum is not None:
                 expected = min(expected, maximum)
             self.assertAlmostEqual(actual[target], max(0, expected), places=8)
-        self.assertIn("pm1", actual["missing_features"])
+        self.assertNotIn("pm1", actual["missing_features"])
+        self.assertNotIn("extinction_coef", actual["missing_features"])
 
 
 class ForecastParserTests(unittest.TestCase):

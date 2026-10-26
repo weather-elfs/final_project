@@ -19,12 +19,15 @@ METADATA_PATH = MODEL_DIR / "metadata.json"
 TARGETS = ("visibility_km", "pm25", "pm10")
 MODEL_PATHS = {target: MODEL_DIR / f"cb_tuned_{target}.cbm" for target in TARGETS}
 MODEL_PATH = MODEL_PATHS["visibility_km"]
+MODEL_VERSION = "low_visibility_89_20261026"
 
 
 @lru_cache(maxsize=1)
 def load_forecast_model():
     """원본 해시·입력 순서를 검사한 뒤 완성 모델만 로드한다."""
     metadata = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+    if metadata.get("version") != MODEL_VERSION or len(metadata["features"]) != 89:
+        raise ValueError("최신 89개 입력 모델 메타데이터가 필요합니다.")
     models = {}
     for target, path in MODEL_PATHS.items():
         blob = path.read_bytes()
@@ -67,11 +70,20 @@ def read_model_history(conn, station_id, origin, asos_table):
     with conn.cursor() as cur:
         cur.execute(
             f"""SELECT w.tm, w.visibility / 100.0 AS visibility_km,
-            w.humidity, w.sea_press AS pressure, a.pm25, a.pm10
+            w.humidity, w.sea_press AS pressure, a.pm25, a.pm10,
+            w.temp AS temperature, w.dew_point AS dewpoint,
+            w.wind_speed, COALESCE(w.rainfall, 0) AS precipitation, m.water_temp AS sea_temp
             FROM {asos_table} w LEFT JOIN public.raw_air_quality a
               ON a.tm=w.tm AND a.station_code=%s
+            LEFT JOIN public.raw_tide_observatory m ON m.tm=w.tm AND m.stn_name=%s
             WHERE w.stn_id=%s AND w.tm BETWEEN %s AND %s ORDER BY w.tm""",
-            (codes[station_id], station_id, origin - timedelta(hours=24), origin),
+            (
+                codes[station_id],
+                "소청초" if station_id == "102" else "인천",
+                station_id,
+                origin - timedelta(hours=72),
+                origin,
+            ),
         )
         return cur.fetchall()
 
@@ -79,7 +91,7 @@ def read_model_history(conn, station_id, origin, asos_table):
 def build_model_input(
     station_id, observed_at, h, asos, airkorea, marine, history, forecast
 ):
-    """76개 입력을 원본 피처 구성·순서·float32 형식에 맞춘다."""
+    """최신 89개 입력을 노트북 피처 구성·순서·float32 형식에 맞춘다."""
     if h not in range(1, 49):
         raise ValueError("예측 범위는 1~48시간입니다.")
     _, metadata = load_forecast_model()
@@ -99,10 +111,6 @@ def build_model_input(
         stn_id=str(station_id),
         h=h,
         visibility_km=visibility,
-        # 전달된 관측 마트의 소산계수와 동일한 상수다(시정 0.01km → 299.6).
-        extinction_coef=(
-            round(2.996 / visibility, 4) if visibility > 0 else float("nan")
-        ),
         temperature=temperature,
         humidity=number(asos["humidity"]),
         dewpoint=dew,
@@ -141,7 +149,7 @@ def build_model_input(
         target_hour_sin=math.sin(2 * math.pi * future.hour / 24),
         target_hour_cos=math.cos(2 * math.pi * future.hour / 24),
     )
-    # 학습 당시 결측 규칙을 유지하며 미제공 PM1·파랑을 0이나 과거 자료로 대신하지 않는다.
+    # 학습 당시 결측 규칙을 유지하며 미제공 파랑을 0이나 과거 자료로 대신하지 않는다.
     for key, threshold in {
         "cloud_cover": 0,
         "pressure": 900,
@@ -154,17 +162,64 @@ def build_model_input(
             features[key] = float("nan")
     if any(row["tm"] > observed_at for row in history):
         raise ValueError("미래 관측 이력 입력 금지")
-    frame = pd.DataFrame(history, columns=["tm", *TARGETS, "humidity", "pressure"])
+    history_columns = [
+        *TARGETS,
+        "humidity",
+        "pressure",
+        "temperature",
+        "dewpoint",
+        "wind_speed",
+        "precipitation",
+        "sea_temp",
+    ]
+    frame = pd.DataFrame(history, columns=["tm", *history_columns])
     frame = (
         frame.drop_duplicates("tm", keep="last")
         .set_index("tm")
         .reindex(
-            pd.date_range(observed_at - timedelta(hours=24), observed_at, freq="h")
+            pd.date_range(observed_at - timedelta(hours=72), observed_at, freq="h")
         )
     )
-    for c in (*TARGETS, "humidity", "pressure"):
+    for c in history_columns:
         frame[c] = pd.to_numeric(frame[c], errors="coerce")
+        frame.loc[~np.isfinite(frame[c]), c] = np.nan
         frame.loc[observed_at, c] = features[c]
+    frame.loc[frame.humidity <= 0, "humidity"] = np.nan
+    frame["dewpoint_depression"] = frame.temperature - frame.dewpoint
+    frame["air_sea_diff"] = frame.temperature - frame.sea_temp
+    # 노트북의 실제 관측 행에서만 무강수를 0으로 해석하고 빈 시간은 유지한다.
+    observed = frame.visibility_km.notna()
+    rain = frame.precipitation.where(frame.precipitation.notna() | ~observed, 0.0)
+    features["precipitation"] = rain.iloc[-1]
+    features["rain_3h"] = rain.iloc[-3:].sum(min_count=1)
+    features["rain_24h"] = rain.iloc[-24:].sum(min_count=1)
+    wet = rain[rain > 0]
+    features["hours_since_rain"] = (
+        min(72, (observed_at - wet.index[-1]).total_seconds() / 3600)
+        if len(wet)
+        else float("nan")
+    )
+    for column, lags in {
+        "dewpoint_depression": (3, 6),
+        "humidity": (6,),
+        "temperature": (3, 6),
+        "wind_speed": (3,),
+        "visibility_km": (1, 6),
+        "air_sea_diff": (3,),
+    }.items():
+        for lag in lags:
+            features[f"chg{lag}h_{column}"] = (
+                frame[column].iloc[-1] - frame[column].iloc[-lag - 1]
+            )
+    features["min_6h_dpd"] = frame.dewpoint_depression.iloc[-6:].min()
+    features["humid90_6h"] = (
+        (frame.humidity >= 90)
+        .astype(float)
+        .where(frame.humidity.notna())
+        .iloc[-6:]
+        .sum(min_count=1)
+    )
+    features["min_6h_visibility_km"] = frame.visibility_km.iloc[-6:].min()
     for c in TARGETS:
         features[f"lag_1h_{c}"] = frame[c].iloc[-2]
         features[f"diff_3h_{c}"] = frame[c].iloc[-1] - frame[c].iloc[-4]
