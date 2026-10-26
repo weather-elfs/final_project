@@ -3,6 +3,7 @@
 import argparse
 import csv
 import math
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -27,8 +28,16 @@ STATION_CODES = {
 }
 
 COLUMNS = [
-    "tm", "station_name", "station_code", "sido",
-    "so2", "co", "o3", "no2", "pm10", "pm25",
+    "tm",
+    "station_name",
+    "station_code",
+    "sido",
+    "so2",
+    "co",
+    "o3",
+    "no2",
+    "pm10",
+    "pm25",
 ]
 
 
@@ -92,14 +101,12 @@ def prepare_records(path):
                 normalized += 1
 
         except Exception as error:
-            raise ValueError(
-                f"CSV_LINE_{line_number}: {error}"
-            ) from error
+            raise ValueError(f"CSV_LINE_{line_number}: {error}") from error
 
     return records, normalized
 
 
-def apply_records(records):
+def apply_records(records, connection=None):
     from backend.database import get_connection
 
     placeholders = ", ".join(["%s"] * len(COLUMNS))
@@ -108,12 +115,15 @@ def apply_records(records):
     sql = f"""
         INSERT INTO public.raw_air_quality ({column_sql})
         VALUES ({placeholders})
-        ON CONFLICT (tm, station_name) DO NOTHING
+        ON CONFLICT (tm, station_name) DO UPDATE SET
+        {', '.join(f'{column} = EXCLUDED.{column}' for column in COLUMNS if column not in ('tm', 'station_name'))}
     """
 
     inserted = 0
 
-    with get_connection() as conn:
+    with (
+        nullcontext(connection) if connection is not None else get_connection()
+    ) as conn:
         with conn.cursor() as cur:
             for record in records:
                 cur.execute(
