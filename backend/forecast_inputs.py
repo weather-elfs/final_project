@@ -1,12 +1,15 @@
 """기상청 단기예보·AirKorea PM2.5 예보를 수집하고 기존 테이블로 매칭한다."""
 
 import json
+import logging
 import math
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
+from time import monotonic
 from zoneinfo import ZoneInfo
 
 from backend.kma_weather import latest_forecast_base
@@ -14,6 +17,10 @@ from backend.kma_weather import latest_forecast_base
 KST = ZoneInfo("Asia/Seoul")
 
 KMA_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+KMA_HUB_URL = (
+    "https://apihub.kma.go.kr/api/typ02/openApi/"
+    "VilageFcstInfoService_2.0/getVilageFcst"
+)
 AIR_URL = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMinuDustFrcstDspth"
 # 전달 모델의 PIT 마트 수집 격자와 일치한다.
 GRIDS = {"102": (21, 136), "112": (54, 125), "201": (51, 130)}
@@ -39,21 +46,38 @@ class ForecastError(ValueError):
         self.source, self.reason = source, reason
 
 
-def request_items(url, params):
-    """정상 응답 및 페이지 완전성을 검증한다."""
+def request_items(url, params, *, timeout=15):
+    """페이지 전체의 시간 제한 안에서 정상 응답·완전성을 검증한다."""
     records = []
+    deadline = monotonic() + timeout
     for page in range(1, 5):
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError()
         query = urllib.parse.urlencode({**params, "pageNo": page})
-        with urllib.request.urlopen(url + "?" + query, timeout=15) as response:
-            payload = json.load(response).get("response", {})
+        with urllib.request.urlopen(url + "?" + query, timeout=remaining) as response:
+            document = json.load(response)
+        if not isinstance(document, dict) or not isinstance(
+            document.get("response"), dict
+        ):
+            raise ValueError("예보 API 응답 구조 오류")
+        payload = document["response"]
+        if not isinstance(payload.get("header"), dict):
+            raise ValueError("예보 API 결과 헤더 누락")
         if str(payload.get("header", {}).get("resultCode")) not in ("00", "0"):
             raise ValueError("예보 API 비정상 응답")
         body = payload.get("body", {})
+        if not isinstance(body, dict):
+            raise ValueError("예보 API 본문 구조 오류")
         items = body.get("items") or []
         if isinstance(items, dict):
             items = items.get("item") or []
         if isinstance(items, dict):
             items = [items]
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) for item in items
+        ):
+            raise ValueError("예보 API 항목 구조 오류")
         records.extend(items)
         if len(records) >= int(body.get("totalCount", len(records))):
             return records
@@ -73,24 +97,60 @@ def precipitation(value):
 
 
 def collect_kma(station_id, origin):
-    """관측 기준시각에 공개돼 있었던 단기예보를 가져온다."""
-    key = os.getenv("DATA_API_KEY")
-    if not key:
-        raise ForecastError("KMA_FORECAST", "API_KEY_MISSING")
+    """공공데이터 실패 시 API허브에서 같은 발표·격자의 예보를 검증한다."""
     base = latest_forecast_base(origin.replace(tzinfo=KST))
     nx, ny = GRIDS[station_id]
-    items = request_items(
-        KMA_URL,
-        {
-            "serviceKey": key,
-            "dataType": "JSON",
-            "numOfRows": 1000,
-            "base_date": base.strftime("%Y%m%d"),
-            "base_time": base.strftime("%H%M"),
-            "nx": nx,
-            "ny": ny,
-        },
+    params = {
+        "dataType": "JSON",
+        "numOfRows": 1000,
+        "base_date": base.strftime("%Y%m%d"),
+        "base_time": base.strftime("%H%M"),
+        "nx": nx,
+        "ny": ny,
+    }
+    providers = (
+        ("DATA_GO_KR", KMA_URL, "serviceKey", os.getenv("DATA_API_KEY"), 8),
+        (
+            "KMA_APIHUB",
+            KMA_HUB_URL,
+            "authKey",
+            os.getenv("KMA_API_KEY") or os.getenv("KMA_AUTH_KEY"),
+            12,
+        ),
     )
+    last_error = ForecastError("KMA_FORECAST", "API_KEY_MISSING")
+    for provider, url, key_name, key, timeout in providers:
+        if not key:
+            continue
+        try:
+            items = request_items(url, {**params, key_name: key}, timeout=timeout)
+            rows = normalize_kma_items(items, origin, base, nx, ny)
+            logging.getLogger("uvicorn.error").info(
+                "[기상청 예보 수신] 경로 %s / 관측소 %s / 발표 %s / %s시간",
+                provider,
+                station_id,
+                base.isoformat(),
+                len(rows),
+            )
+            return rows
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
+            last_error = exc
+            logging.getLogger("uvicorn.error").warning(
+                "기상청 예보 경로 실패: %s / %s / HTTP %s",
+                provider,
+                type(exc).__name__,
+                exc.code if isinstance(exc, urllib.error.HTTPError) else None,
+            )
+    raise last_error
+
+
+def normalize_kma_items(items, origin, base, nx, ny):
+    """두 경로에 동일한 발표시각·격자·항목·수치 검증을 적용한다."""
     rows = {}
     for item in items:
         if (int(item["nx"]), int(item["ny"])) != (nx, ny):

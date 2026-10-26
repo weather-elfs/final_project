@@ -1,7 +1,9 @@
 """전달 튜닝형의 시각 매칭·단위·이력·출력 복원과 API 파서를 검증한다."""
 
+import json
 import math
 import unittest
+import urllib.error
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -223,6 +225,103 @@ class TunedModelTests(unittest.TestCase):
 
 
 class ForecastParserTests(unittest.TestCase):
+    def kma_items(self):
+        values = dict(
+            TMP="17",
+            REH="80",
+            WSD="4",
+            VEC="270",
+            PCP="강수없음",
+            POP="10",
+            PTY="0",
+            SKY="3",
+        )
+        return [
+            dict(
+                nx=54,
+                ny=125,
+                baseDate="20261025",
+                baseTime="1700",
+                fcstDate="20261025",
+                fcstTime="2100",
+                category=category,
+                fcstValue=value,
+            )
+            for category, value in values.items()
+        ]
+
+    def test_kma_falls_back_for_transport_payload_and_validation_failures(self):
+        invalid = self.kma_items()
+        invalid[0]["nx"] = 55
+        for failure in (
+            TimeoutError(),
+            urllib.error.HTTPError(fc.KMA_URL, 503, "unavailable", None, None),
+            json.JSONDecodeError("HTML", "<html>", 0),
+            ValueError("API error"),
+            invalid,
+        ):
+            with self.subTest(failure=type(failure).__name__), patch.dict(
+                "os.environ",
+                {"DATA_API_KEY": "primary-test", "KMA_API_KEY": "hub-test"},
+                clear=True,
+            ), patch.object(
+                fc, "request_items", side_effect=[failure, self.kma_items()]
+            ) as request:
+                rows = fc.collect_kma("112", datetime(2026, 10, 25, 18))
+                self.assertEqual(rows[0]["tmp_1h"], 17)
+                primary, backup = request.call_args_list
+                self.assertEqual(primary.args[0], fc.KMA_URL)
+                self.assertEqual(backup.args[0], fc.KMA_HUB_URL)
+                self.assertEqual(backup.args[1]["authKey"], "hub-test")
+                self.assertNotIn("serviceKey", backup.args[1])
+                for field in ("nx", "ny", "base_date", "base_time"):
+                    self.assertEqual(primary.args[1][field], backup.args[1][field])
+                self.assertLess(
+                    primary.kwargs["timeout"] + backup.kwargs["timeout"], 25
+                )
+
+    def test_kma_does_not_call_backup_after_primary_success(self):
+        with patch.dict(
+            "os.environ", {"DATA_API_KEY": "test"}, clear=True
+        ), patch.object(fc, "request_items", return_value=self.kma_items()) as request:
+            self.assertEqual(len(fc.collect_kma("112", datetime(2026, 10, 25, 18))), 1)
+            request.assert_called_once()
+
+    def test_kma_backup_is_validated_and_double_failure_is_not_success(self):
+        for failure in (TimeoutError(), self.kma_items()[:-1]):
+            with patch.dict(
+                "os.environ",
+                {"DATA_API_KEY": "test", "KMA_API_KEY": "hub-test"},
+                clear=True,
+            ), patch.object(fc, "request_items", side_effect=[TimeoutError(), failure]):
+                with self.assertRaises((TimeoutError, ValueError)):
+                    fc.collect_kma("112", datetime(2026, 10, 25, 18))
+
+    def test_kma_can_use_hub_without_primary_key(self):
+        with patch.dict(
+            "os.environ", {"KMA_API_KEY": "hub-test"}, clear=True
+        ), patch.object(fc, "request_items", return_value=self.kma_items()) as request:
+            fc.collect_kma("112", datetime(2026, 10, 25, 18))
+            self.assertEqual(request.call_args.args[0], fc.KMA_HUB_URL)
+
+    def test_pagination_shares_one_time_budget(self):
+        with patch.object(fc, "monotonic", side_effect=[0, 16]), patch.object(
+            fc.urllib.request, "urlopen"
+        ) as request:
+            with self.assertRaises(TimeoutError):
+                fc.request_items("https://example.test", {}, timeout=15)
+            request.assert_not_called()
+
+    def test_non_object_payload_is_rejected_as_invalid_response(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        for payload in ([], {"response": []}, {"response": {"header": None}}):
+            with patch.object(
+                fc.urllib.request, "urlopen", return_value=response
+            ), patch.object(fc.json, "load", return_value=payload):
+                with self.assertRaises(ValueError):
+                    fc.request_items("https://example.test", {})
+
     def test_memory_matching_excludes_future_releases_and_keeps_exact_targets(self):
         origin = datetime(2026, 10, 25, 18)
         target = origin + timedelta(hours=3)
