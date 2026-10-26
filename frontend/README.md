@@ -19,12 +19,12 @@ pnpm build-storybook
 
 ### 로컬 백엔드 로그 확인 (PowerShell / UTF-8)
 
-현재 로컬 백엔드는 백그라운드로 실행하며 표준 출력은 `stdout.log`, 시작·오류 출력은
+현재 로컬 백엔드는 백그라운드로 실행하며 접근 로그는 `stdout.log`, 수집·예측 완료와 시작·오류 로그는
 `stderr.log`에 저장한다. 아래는 2026-10-26 실행 세션의 경로이며, 재실행할 때는
 로그를 저장하도록 지정한 실제 폴더로 바꾼다. 로그가 깨지지 않도록 `-Encoding UTF8`을 명시한다.
 
 ```powershell
-$backendLogDir = Join-Path $env:TEMP 'codex-backend-aqi-2c29f0281f0449dea238e45eddbcbd7e'
+$backendLogDir = Join-Path $env:TEMP 'codex-backend-memory-67538cd7955446408ed546e8813c82bf-v4'
 Get-Content -LiteralPath (Join-Path $backendLogDir 'stdout.log') -Encoding UTF8 -Tail 50 -Wait
 ```
 
@@ -35,7 +35,7 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stdout.log') -Encoding UTF8 
 Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 -Tail 50 -Wait
 ```
 
-`[DB 적재 완료]`와 해당 `/api/v1/stations/.../dashboard` 요청의 HTTP 상태를 함께 확인한다.
+`[API 수집 완료]`, `[예측 완료]`와 해당 `/api/v1/stations/.../dashboard` 요청의 HTTP 상태를 함께 확인한다.
 `/api/health`의 200 응답만으로 실제 수집·예측 성공을 판단하지 않는다. 이 경로는 로컬
 임시 폴더이며 Docker 배포 환경의 로그 위치·조회 명령과는 다르다.
 
@@ -43,7 +43,7 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 
 
 - [BE–FE 연동 API 명세서 v0.4 (2026-09-30)](https://docs.google.com/document/d/1zjBbNEa1c2HuNsfqGURhRHMnJt8upEdP/edit?rtpof=true&tab=t.0)
 
-### 최신 관측 수집·예측 조회 (2026-10-25)
+### 최신 관측 수집·예측 조회 (2026-10-26)
 
 브랜치 동기화 확인일: 2026-10-26. `feature/frontend`에는 백엔드 PR #6이 병합된
 `develop`의 `0da333f`를 반영했다. 이 기준의 백엔드 소스와, 이후 수정한 실시간 수집
@@ -54,15 +54,22 @@ Get-Content -LiteralPath (Join-Path $backendLogDir 'stderr.log') -Encoding UTF8 
 실행 중인 서버의 소스 폴더·프로세스가 자동으로 전환되는 것은 아니다.
 
 실제 백엔드 모드의 일반 대시보드 조회는 ASOS·AirKorea·국립해양조사원 관측과
-기상청 단기예보·AirKorea PM2.5 예보를 수집하고, DB 적재 후 관측+예보 튜닝형으로 예측한다.
+기상청 단기예보·AirKorea PM2.5 예보를 수집하고, 요청별 메모리 자료로 관측+예보 튜닝형 예측을 수행한다.
+일반 실시간 조회와 대시보드 설정 조회는 DB 연결·적재 및 `DB_*` 환경변수를 요구하지 않는다.
+ASOS 최근 25개 시간대와 AirKorea 실측 시계열을 사용하며 결측 시간을 임의 보간하지 않는다.
+대기질 예보는 `ArpltnInforInqireSvc/getMinuDustFrcstDspth`의 인천 PM2.5 예보 등급을 사용한다.
+조회 전 관측소 상태는 `UNKNOWN`이며, 선택한 관측소의 지도 상태는 실제 대시보드 응답으로 갱신한다.
 이 요청만 최대 60초를 기다리며, 실패하면
 이전 관측·예측을 지우고 서버 오류를 표시한다. 다른 API의 제한 시간은 변경하지 않는다.
 
 `current.observed_at`은 ASOS 관측 시각, `source_status[].observed_at`은 출처별 관측 시각이다.
-`meta.collection.requested_at` / `collected_at`은 수집 요청·적재 완료 시각이며,
+`meta.collection.requested_at` / `collected_at`은 수집 요청·수집 완료 시각이며,
 `meta.collection.model_input_observed_at`으로 실제 모델 입력의 출처별 시각을 확인할 수 있다.
 최신 자료는 기관이 공개한 가장 최근 관측을 뜻하며, 요청한 초의 관측을 의미하지 않는다.
-`as_of` 과거 조회와 백엔드 `mock=true` 시연은 별도 동작이다.
+`meta.collection.storage = memory`, `collected_rows`로 메모리 처리와 출처별 수집 건수를 확인한다.
+자료는 응답 이후 영구 저장되지 않는다. `as_of` 과거 조회와 인천 `mock=true`는 기존 DB 경로이므로
+DB 없는 실행에서는 파라미터를 생략하고 실제 API 기본값(`mock=false`)을 사용한다.
+외부 API 장애·미발표 예보는 DB 없이도 조회 실패를 일으킬 수 있다.
 
 `meta.model.name = catboost_observation_forecast_tuned`는 전달된 최종 ZIP의 튜닝형을 뜻한다.
 `meta.forecasts[]`에는 각 예측 대상시각의 실제 예보 입력값, `kma_issued_at`,
