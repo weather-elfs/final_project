@@ -1,6 +1,6 @@
 import type { StationCurrentStatus, StationForecastStatus } from './types';
 
-const SUCCESS_STATUSES = new Set(['OK', 'SUCCESS', 'GOOD', 'RETRY_SUCCESS']);
+const SUCCESS_STATUSES = new Set(['OK', 'SUCCESS', 'GOOD', 'FRESH', 'RETRY_SUCCESS']);
 
 export function normalizeCurrentStatus(status?: string): StationCurrentStatus {
   const normalized = status?.toUpperCase();

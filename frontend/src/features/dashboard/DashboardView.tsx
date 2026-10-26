@@ -13,7 +13,7 @@ import VisibilitySummary from './components/VisibilitySummary';
 import WeatherMap from './components/WeatherMap';
 import { buildFogCoverageBounds } from './fogDistribution';
 import { buildForecastFogDemoFrames } from './forecastFog';
-import { isForecastAvailable } from './stationStatus';
+import { isForecastAvailable, normalizeCurrentStatus } from './stationStatus';
 import type { DashboardViewProps } from './types';
 
 function useCurrentTime() {
@@ -140,7 +140,9 @@ export default function DashboardView({
         : null,
       status:
         mapMode === 'current'
-          ? (station.currentStatus ?? 'UNKNOWN')
+          ? hasSelectedDashboard
+            ? normalizeCurrentStatus(dashboard?.current?.status)
+            : (station.currentStatus ?? 'UNKNOWN')
           : hasSelectedDashboard && forecastMapPoint
             ? 'GOOD'
             : (station.forecastStatus ?? 'UNKNOWN'),

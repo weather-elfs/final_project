@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { stationsInViewport, toDashboardConfig, toDashboardData, toViewModel } from './dashboardAdapter';
+import { normalizeCurrentStatus } from './stationStatus';
+
+test('DB 없이 수집 전인 관측소와 실제 API에서 받은 최신 상태를 구분한다', () => {
+  assert.equal(normalizeCurrentStatus('UNKNOWN'), 'UNKNOWN');
+  assert.equal(normalizeCurrentStatus('fresh'), 'GOOD');
+  assert.equal(normalizeCurrentStatus('delayed'), 'DELAYED');
+  assert.equal(normalizeCurrentStatus('missing'), 'MISSING');
+});
 
 test('API snake_case를 UI camelCase로 변환하고 비활성 항목을 제외한다', () => {
   const config = toDashboardConfig({
