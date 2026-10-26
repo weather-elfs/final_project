@@ -10,6 +10,7 @@ import HistoryPage from '../history/HistoryPage';
 import ForecastPanel from './components/ForecastPanel';
 import MissionConditionsForm from './components/MissionConditionsForm';
 import VisibilitySummary from './components/VisibilitySummary';
+import CollectionStatus from './components/CollectionStatus';
 import WeatherMap from './components/WeatherMap';
 import { buildFogCoverageBounds } from './fogDistribution';
 import { buildForecastFogDemoFrames } from './forecastFog';
@@ -56,12 +57,14 @@ export default function DashboardView({
   values,
   forecastRequested = false,
   loading = false,
+  retryingSource,
   error = '',
   onChange,
   onMapModeChange,
   onMapViewportChange,
   onStationSelect,
   onRefresh,
+  onRetrySource,
   onSubmit,
   onLogout,
 }: DashboardViewProps) {
@@ -290,6 +293,7 @@ export default function DashboardView({
                 <span>{error}</span>
               </div>
             )}
+            <CollectionStatus dashboard={dashboard} loading={loading} retryingSource={retryingSource} onRetrySource={onRetrySource} />
             <div className='dashboard-grid' aria-busy={loading}>
               <section className='panel map-panel' aria-labelledby='map-title'>
                 <div className='panel-header map-header'>
@@ -380,13 +384,14 @@ export default function DashboardView({
                 dashboard={dashboard}
                 loading={loading}
                 onRefresh={onRefresh}
+                retryingSource={retryingSource}
               />
               <MissionConditionsForm
                 config={missionConfig}
                 values={values}
                 currentTime={liveReferenceTime}
-                forecastBaseTime={dashboard?.current?.observedAt}
-                loading={loading}
+                forecastBaseTime={dashboard?.meta?.model?.originAt ?? dashboard?.current?.observedAt}
+                loading={loading || Boolean(retryingSource)}
                 onChange={onChange}
                 onSubmit={onSubmit}
               />

@@ -34,3 +34,14 @@ test('시정 자료 없음은 안개 없음과 구분한다', () => {
   assert.match(markup, /판단 대기/);
   assert.doesNotMatch(markup, /안개 없음/);
 });
+test('누락 입력과 항목별 예측 불가를 표시하면서 가능한 예측은 유지한다', () => {
+  const markup = renderToStaticMarkup(createElement(ForecastPanel, {
+    dashboard: { forecastTimeline: [{ horizonH: 3, validAt: '2026-10-26T12:00:00+09:00', status: 'degraded', visibilityPredKm: 12, pm25PredUgM3: null, pm10PredUgM3: 20, missingSources: ['AIRKOREA_FORECAST'], unavailableTargets: ['pm25'] }] },
+    requested: true, loading: false,
+  }));
+  assert.match(markup, /일부 입력 누락/);
+  assert.match(markup, /에어코리아 예보/);
+  assert.match(markup, /PM2.5 예측 없음/);
+  assert.match(markup, /12.0 km/);
+  assert.match(markup, /20.0 ㎍\/m³/);
+});

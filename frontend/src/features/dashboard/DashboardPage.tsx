@@ -24,6 +24,7 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
   const [forecastRequested, setForecastRequested] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [retryingSource, setRetryingSource] = useState<string | null>(null);
 
   const errorMessage = (requestError: unknown) => {
     if (requestError instanceof ApiError && requestError.status === 401) onUnauthorized();
@@ -105,7 +106,7 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
       const response = await getDashboard(request);
       setDashboard(toDashboardData(response.data));
     } catch (requestError) {
-      setDashboard(null);
+      setDashboard((current) => current?.station?.stationId === request.stationId && current?.requestContext?.forecastIntervalH === request.forecastIntervalH ? current : null);
       setError(errorMessage(requestError));
     } finally {
       setLoading(false);
@@ -119,12 +120,31 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
     void loadDashboard(request);
   };
 
+  const handleRetrySource = async (source: string) => {
+    const collection = dashboard?.meta?.collection;
+    const context = dashboard?.requestContext;
+    const stationId = dashboard?.station?.stationId;
+    if (loading || retryingSource || !collection?.id || !stationId || !context?.forecastIntervalH || !context.missionType) return;
+    setRetryingSource(source);
+    setError('');
+    try {
+      const response = await getDashboard({ stationId, forecastIntervalH: context.forecastIntervalH, missionType: context.missionType, collectionId: collection.id, retrySource: source });
+      setDashboard((current) => current?.meta?.collection?.id === collection.id ? toDashboardData(response.data) : current);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setRetryingSource(null);
+    }
+  };
+
   const handleRefresh = () => {
+    if (retryingSource) return;
     const request = fallbackRequest();
     if (request) void loadDashboard(request);
   };
 
   const handleStationSelect = (stationId: string) => {
+    if (retryingSource) return;
     setValues((current) => ({ ...current, stationId }));
     const request = fallbackRequest(stationId);
     if (request) void loadDashboard(request);
@@ -144,5 +164,5 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
     setValues((current) => ({ ...current, [key]: value } as MissionValues));
   };
 
-  return <DashboardView centerId={centerId} config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} loading={loading} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onSubmit={handleSubmit} onLogout={onUnauthorized} />;
+  return <DashboardView centerId={centerId} config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} loading={loading} retryingSource={retryingSource} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onRetrySource={handleRetrySource} onSubmit={handleSubmit} onLogout={onUnauthorized} />;
 }

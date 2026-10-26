@@ -5,7 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { DashboardData } from '../types';
 import { toDashboardData } from '../dashboardAdapter';
-import VisibilitySummary from './VisibilitySummary';
+import VisibilitySummary, { sourceStatusMessage } from './VisibilitySummary';
+import CollectionStatus from './CollectionStatus';
 
 function renderSummary(dashboard: DashboardData) {
   return renderToStaticMarkup(createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }));
@@ -94,4 +95,22 @@ test('500 초과 NowCast는 실제 수치와 기획안 위험 5단계를 표시�
   const markup = renderSummary({ current: { aqi: { basis: 'NOWCAST_CURRENT', status: 'calculated', value: 649 } } });
   assert.match(markup, /AQI \(NowCast\) 649 · 위험/);
   assert.match(markup, /grade-tone-maroon">5\/5단계/);
+});
+test('부분 성공은 기존 관측과 출처별 재시도 버튼을 함께 유지한다', () => {
+  const dashboard: DashboardData = { current: { visibilityKm: 20, pm25UgM3: 10 }, forecastTimeline: [{ horizonH: 3, status: 'degraded', visibilityPredKm: 18 }], meta: { collection: { id: 'sample', errors: { TIDE_OBSERVATORY: 'COLLECTION_FAILED' }, retryableSources: ['TIDE_OBSERVATORY'] } } };
+  const markup = renderToStaticMarkup(createElement('div', null,
+    createElement(CollectionStatus, { dashboard, loading: false, retryingSource: 'TIDE_OBSERVATORY', onRetrySource: () => {} }),
+    createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }),
+  ));
+  assert.match(markup, /20.0 km/);
+  assert.match(markup, /10 µg\/m³/);
+  assert.match(markup, /국립해양조사원만 재시도/);
+  assert.match(markup, /재시도 중…/);
+  assert.match(markup, /일부 자료 누락/);
+});
+test('예보 발표·수집 시각은 관측 시각과 구분하고 일부 누락 사유를 표시한다', () => {
+  const message = sourceStatusMessage({ source: 'AIRKOREA_FORECAST', status: 'partial', issuedAt: '2026-10-26T05:00:00+09:00', collectedAt: '2026-10-26T10:00:00+09:00', reason: 'TARGET_TIME_MISSING_OR_STALE' });
+  assert.match(message, /발표 05:00:00 · 수집 10:00:00/);
+  assert.match(message, /해당 시점의 예보가 없거나 오래됐습니다/);
+  assert.doesNotMatch(message, /미수신/);
 });

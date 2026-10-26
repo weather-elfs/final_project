@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AIR_QUALITY_CRITERIA, airQualityByAqi, airQualityByParticles, fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData, SourceStatusDetail } from '../types';
+import { DATA_SOURCE_LABELS, SOURCE_FAILURE_MESSAGES } from '../stationStatus';
 
 const FOG_CRITERIA = [
   { stage: '안개 없음', label: '시정 양호', range: '10 km 이상', tone: 'sky' },
@@ -15,6 +16,7 @@ const FOG_CRITERIA = [
 ] as const;
 
 const SOURCE_LABELS: Record<string, string> = {
+  ...DATA_SOURCE_LABELS,
   ASOS: '기상청 ASOS',
   AIRKOREA: '에어코리아',
   TIDE_OBSERVATORY: '국립해양조사원',
@@ -28,6 +30,7 @@ const SOURCE_ORDER = ['ASOS', 'TIDE_OBSERVATORY', 'MARINE', 'PM1', 'FOREST', 'AI
 
 function sourceStatusPresentation(status?: string) {
   const normalized = status?.toUpperCase();
+  if (normalized === 'PARTIAL') return { label: '일부 누락', tone: 'delayed' } as const;
   if (normalized === 'OK' || normalized === 'FRESH' || normalized === 'GOOD') {
     return { label: '정상', tone: 'good' } as const;
   }
@@ -44,19 +47,24 @@ function elapsedLabel(minutes?: number | null) {
   return `${Math.max(1, Math.floor(minutes))}분째 미수신`;
 }
 
-function sourceStatusMessage(source: SourceStatusDetail) {
+export function sourceStatusMessage(source: SourceStatusDetail) {
   const presentation = sourceStatusPresentation(source.status);
+  if (source.source.toUpperCase().endsWith('_FORECAST')) {
+    const times = [source.issuedAt ? `발표 ${formatKstTime(source.issuedAt)}` : '', source.collectedAt ? `수집 ${formatKstTime(source.collectedAt)}` : ''].filter(Boolean).join(' · ');
+    return `${presentation.tone === 'good' ? '예보 수신' : SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '예보 일부 누락'}${times ? ` · ${times}` : ''}`;
+  }
   const observedTime = source.observedAt ? formatKstTime(source.observedAt) : '';
+  if (source.status.toUpperCase() === 'PARTIAL') return `${SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '일부 관측값 누락'}${observedTime ? ` · 관측 ${observedTime}` : ''}`;
   if (presentation.tone === 'good') return observedTime ? `${observedTime} 수신` : '정상 수신';
   if (presentation.tone === 'delayed') {
     return `${elapsedLabel(source.ageMinutes)}${observedTime ? ` · 정상 ${observedTime}` : ''}`;
   }
 
-  const reason = source.reason?.toUpperCase() === 'TIMEOUT'
+  const reason = SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? (source.reason?.toUpperCase() === 'TIMEOUT'
     ? '응답 시간 초과'
     : source.reason?.toUpperCase() === 'MISSING'
       ? '데이터 없음'
-      : source.reason || '수신 오류';
+      : source.reason || '수신 오류');
   return `${reason}${observedTime ? ` · 정상 ${observedTime}` : ''}`;
 }
 
@@ -67,7 +75,7 @@ function weatherGlyph(label?: string) {
   return '≡';
 }
 
-export default function VisibilitySummary({ dashboard, loading, onRefresh }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void }) {
+export default function VisibilitySummary({ dashboard, loading, onRefresh, retryingSource }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void; retryingSource?: string | null }) {
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const criteriaRootRef = useRef<HTMLDivElement>(null);
@@ -77,7 +85,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
   const lastRefreshAt = dashboard?.meta?.generatedAt;
   const errors = dashboard?.apiStatus?.summary?.fail ?? 0;
   const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
-  const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `오류 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
+  const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `일부 누락 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
   const statusTone = !dashboard ? 'delayed' : errors ? 'error' : delayed ? 'delayed' : 'good';
   const fogGrade = fogGradeByVisibility(current?.visibilityKm);
   const serverAqi = current?.aqi;
@@ -185,7 +193,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh }: { d
               </div>
             )}
           </div>
-          <button type="button" className="refresh-button" onClick={onRefresh} disabled={loading} aria-label="현재 관측 갱신"><img src="/figma-assets/refresh.svg" alt="" /></button>
+          <button type="button" className="refresh-button" onClick={onRefresh} disabled={loading || Boolean(retryingSource)} aria-label="현재 관측 갱신"><img src="/figma-assets/refresh.svg" alt="" /></button>
         </div>
       </div>
 

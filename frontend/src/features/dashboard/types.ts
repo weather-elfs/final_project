@@ -87,6 +87,10 @@ export interface ForecastPoint {
   validAt?: string;
   horizonH?: number;
   status?: string;
+  missingSources?: string[];
+  missingFeatures?: string[];
+  unavailableTargets?: string[];
+  reason?: string;
   visibilityPredKm?: number | null;
   visibilityGrade?: string;
   pm25PredUgM3?: number | null;
@@ -123,6 +127,8 @@ export interface SourceStatusDetail {
   source: string;
   status: string;
   observedAt?: string | null;
+  issuedAt?: string | null;
+  collectedAt?: string | null;
   ageMinutes?: number | null;
   reason?: string | null;
 }
@@ -167,7 +173,18 @@ export interface DashboardData {
     summary?: { good?: number; delayed?: number; fail?: number };
     sources?: Array<{ source?: string; displayName?: string; code?: string; label?: string }>;
   };
-  meta?: { requestId?: string; generatedAt?: string; partial?: boolean; mock?: boolean };
+  meta?: {
+    requestId?: string; generatedAt?: string; partial?: boolean; mock?: boolean;
+    model?: { missingFeatures?: string[]; originAt?: string };
+    collection?: {
+      id: string;
+      expiresAt?: string;
+      errors?: Record<string, string>;
+      retryableSources?: string[];
+      modelInputObservedAt?: Record<string, string | null>;
+      fetchedAt?: Record<string, string>;
+    };
+  };
 }
 
 export interface DashboardMapPoint {
@@ -197,6 +214,8 @@ export interface DashboardViewProps {
   onMapViewportChange: (viewport: MapViewport) => void;
   onStationSelect: (stationId: string) => void;
   onRefresh: () => void;
+  onRetrySource?: (source: string) => void;
+  retryingSource?: string | null;
   onSubmit: () => void;
   onLogout?: () => void;
 }

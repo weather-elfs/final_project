@@ -22,6 +22,8 @@ export interface DashboardRequest {
   missionType: string;
   asOf?: string;
   mock?: boolean;
+  collectionId?: string;
+  retrySource?: string;
 }
 
 export interface HistoryRequest {
@@ -88,7 +90,7 @@ export async function request<T>(url: string, options: RequestInit = {}): Promis
   return payload;
 }
 
-export function buildDashboardUrl({ stationId, forecastIntervalH, missionType, asOf, mock }: DashboardRequest) {
+export function buildDashboardUrl({ stationId, forecastIntervalH, missionType, asOf, mock, collectionId, retrySource }: DashboardRequest) {
   const query = new URLSearchParams({
     forecast_interval_h: String(forecastIntervalH),
     mission_type: missionType,
@@ -96,6 +98,8 @@ export function buildDashboardUrl({ stationId, forecastIntervalH, missionType, a
 
   if (asOf) query.set('as_of', asOf);
   if (mock != null) query.set('mock', String(mock));
+  if (collectionId) query.set('collection_id', collectionId);
+  if (retrySource) query.set('retry_source', retrySource);
 
   return `/api/v1/stations/${encodeURIComponent(stationId)}/dashboard?${query}`;
 }

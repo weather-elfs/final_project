@@ -527,3 +527,17 @@
 .metric-grid strong {
   font-size: 16px;
 }
+.collection-status {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #e5c788;
+  border-radius: 0.5rem;
+  background: #fff9ec;
+  color: #664b1e;
+  font-size: 0.8rem;
+}
+.collection-status p { margin: 0.4rem 0; line-height: 1.5; }
+.collection-source { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-top: 0.5rem; }
+.collection-source small { display: block; margin-top: 0.2rem; }
+.collection-source button { flex-shrink: 0; padding: 0.35rem 0.6rem; border: 1px solid #b89042; border-radius: 0.35rem; background: #fff; color: #664b1e; cursor: pointer; }
+.collection-source button:disabled { opacity: 0.6; cursor: default; }

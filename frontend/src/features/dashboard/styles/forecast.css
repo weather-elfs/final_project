@@ -137,3 +137,5 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.forecast-input-status td { color: #805500; font-size: 0.75rem; }
+.forecast-input-status strong, .forecast-input-status small { display: block; line-height: 1.5; }

@@ -120,3 +120,10 @@ test('최신 수집 실패는 정상 응답이나 과거 예측으로 대체하�
     code: 'LATEST_DATA_UNAVAILABLE', status: 503, requestId: 'req-live-failed',
   });
 });
+test('실패 출처 재시도 URL은 원래 조회 조건과 수집 ID를 보존한다', () => {
+  const url = buildDashboardUrl({ stationId: '112', forecastIntervalH: 12, missionType: 'MARITIME_TRANSPORT', collectionId: 'sample-collection', retrySource: 'AIRKOREA_FORECAST' });
+  const params = new URL(url, 'http://localhost').searchParams;
+  assert.equal(params.get('collection_id'), 'sample-collection');
+  assert.equal(params.get('retry_source'), 'AIRKOREA_FORECAST');
+  assert.equal(params.get('forecast_interval_h'), '12');
+});

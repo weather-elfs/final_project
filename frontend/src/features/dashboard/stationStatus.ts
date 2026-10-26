@@ -2,6 +2,20 @@ import type { StationCurrentStatus, StationForecastStatus } from './types';
 
 const SUCCESS_STATUSES = new Set(['OK', 'SUCCESS', 'GOOD', 'FRESH', 'RETRY_SUCCESS']);
 
+export const DATA_SOURCE_LABELS: Record<string, string> = {
+  ASOS: '기상청 ASOS', AIRKOREA: '에어코리아 관측', TIDE_OBSERVATORY: '국립해양조사원',
+  KMA_FORECAST: '기상청 예보', AIRKOREA_FORECAST: '에어코리아 예보',
+};
+
+export const SOURCE_FAILURE_MESSAGES: Record<string, string> = {
+  TIMEOUT: '응답 시간이 초과됐습니다.',
+  COLLECTION_FAILED: '응답을 받지 못했습니다.',
+  EMPTY_DATA: '받은 자료가 없습니다.',
+  TARGET_TIME_MISSING_OR_STALE: '해당 시점의 예보가 없거나 오래됐습니다.',
+  STALE_OR_FUTURE_OBSERVATION: '사용할 수 있는 최신 관측이 없습니다.',
+  BASELINE_MISSING: '예측 기준이 되는 일부 관측값이 없습니다.',
+};
+
 export function normalizeCurrentStatus(status?: string): StationCurrentStatus {
   const normalized = status?.toUpperCase();
 

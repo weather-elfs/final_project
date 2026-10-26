@@ -1,6 +1,9 @@
 import { fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
 import type { DashboardData } from '../types';
+import { DATA_SOURCE_LABELS } from '../stationStatus';
+
+const TARGET_LABELS: Record<string, string> = { visibility_km: '시정', pm25: 'PM2.5', pm10: 'PM10' };
 
 interface ForecastPanelProps {
   dashboard: DashboardData | null;
@@ -53,6 +56,12 @@ export default function ForecastPanel({ dashboard, requested, loading, available
                 </tr>
               </thead>
               <tbody>
+                {forecast.some((point) => point.status === 'degraded' || point.status === 'unavailable' || point.missingFeatures?.length) && <tr className="forecast-input-status"><th scope="row">입력 상태</th>{forecast.map((point) => <td key={`input-${point.horizonH}`}>
+                  <strong>{point.status === 'unavailable' ? '예측 불가' : point.status === 'degraded' ? '일부 입력 누락' : point.missingFeatures?.length ? '일부 항목 결측' : '수신 완료'}</strong>
+                  {!!point.missingFeatures?.length && <small>모델 입력 {point.missingFeatures.length}개 결측</small>}
+                  {!!point.missingSources?.length && <small>{point.missingSources.map((source) => DATA_SOURCE_LABELS[source] ?? source).join(' · ')}</small>}
+                  {!!point.unavailableTargets?.length && <small>{point.unavailableTargets.map((target) => TARGET_LABELS[target] ?? target).join(' · ')} 예측 없음</small>}
+                </td>)}</tr>}
                 <tr className="forecast-visibility-row"><th scope="row">시정</th>{forecast.map((point) => <td key={`visibility-${point.horizonH}-${point.validAt}`}>{metric(point.visibilityPredKm, 'km', 1)}</td>)}</tr>
                 <tr><th scope="row">안개 단계</th>{forecast.map((point) => {
                   const grade = fogGradeByVisibility(point.visibilityPredKm);
