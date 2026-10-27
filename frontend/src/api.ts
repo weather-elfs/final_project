@@ -1,4 +1,4 @@
-import { DEMO_CENTER, DEMO_MODE, demoAlertOperations, demoHistory, matchesDemoLogin } from './demo';
+import { DEMO_CENTER, DEMO_LOGIN_MODE, DEMO_MODE, demoAlertOperations, demoHistory, matchesDemoLogin } from './demo';
 
 const SUCCESS_CODES = new Set(['SUCCESS', 'PARTIAL_SUCCESS']);
 
@@ -124,7 +124,7 @@ export function buildHistoryUrl({ historyType, missionType }: HistoryRequest = {
 }
 
 export async function login(centerId: string, password: string, options?: RequestInit) {
-  if (DEMO_MODE) {
+  if (DEMO_LOGIN_MODE) {
     options?.signal?.throwIfAborted();
     if (!matchesDemoLogin(centerId, password)) {
       throw new ApiError('시연용 센터 ID와 비밀번호를 확인하세요.', { code: 'INVALID_DEMO_ACCESS', status: 401 });

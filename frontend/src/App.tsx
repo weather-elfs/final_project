@@ -1,17 +1,24 @@
 import { useCallback, useState } from 'react';
 
+import { DEMO_CENTER, DEMO_LOGIN_MODE } from './demo';
 import LoginPage from './features/auth/LoginPage';
 import DashboardPage from './features/dashboard/DashboardPage';
 
-const BACKEND_INTEGRATION_MODE = import.meta.env.DEV && import.meta.env.MODE === 'backend';
-const DEVELOPMENT_CENTER = { id: '33182', name: '개발용 관제센터' };
+const DEMO_SESSION_KEY = 'weather-demo-session';
 
 export default function App() {
-  const [center, setCenter] = useState<{ id: string; name: string } | null>(BACKEND_INTEGRATION_MODE ? DEVELOPMENT_CENTER : null);
+  const [center, setCenter] = useState<{ id: string; name: string } | null>(() => (
+    DEMO_LOGIN_MODE && sessionStorage.getItem(DEMO_SESSION_KEY) === 'active' ? { ...DEMO_CENTER } : null
+  ));
+  const handleAuthenticated = (nextCenter: { id: string; name: string }) => {
+    if (DEMO_LOGIN_MODE) sessionStorage.setItem(DEMO_SESSION_KEY, 'active');
+    setCenter(nextCenter);
+  };
   const clearAuthentication = useCallback(() => {
-    if (!BACKEND_INTEGRATION_MODE) setCenter(null);
+    sessionStorage.removeItem(DEMO_SESSION_KEY);
+    setCenter(null);
   }, []);
 
-  if (!center) return <LoginPage onAuthenticated={setCenter} />;
+  if (!center) return <LoginPage onAuthenticated={handleAuthenticated} />;
   return <DashboardPage centerId={center.id} onUnauthorized={clearAuthentication} />;
 }

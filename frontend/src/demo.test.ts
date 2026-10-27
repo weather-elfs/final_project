@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DEMO_MODE, demoAlertOperations, demoHistory, matchesDemoLogin } from './demo';
+import { DEMO_LOGIN_MODE, DEMO_MODE, demoAlertOperations, demoHistory, matchesDemoLogin } from './demo';
 import { toAlertOperationsData } from './features/alerts/alertAdapter';
 import { toHistoryData } from './features/history/historyAdapter';
 
 test('명시적인 demo 모드가 아니면 시연 분기를 활성화하지 않는다', () => {
   assert.equal(DEMO_MODE, false);
+  assert.equal(Boolean(DEMO_LOGIN_MODE), false);
 });
 
 test('공개 시연 ID와 코드가 모두 맞을 때만 진입을 허용한다', () => {

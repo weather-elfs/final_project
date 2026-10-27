@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 
 import { login } from '../../api';
-import { DEMO_MODE } from '../../demo';
+import { DEMO_LOGIN_MODE } from '../../demo';
 
 interface LoginPageProps {
   onAuthenticated: (center: { id: string; name: string }) => void;
@@ -45,7 +45,7 @@ export default function LoginPage({ onAuthenticated }: LoginPageProps) {
         </div>
         <header>
           <h1 id="login-title">저시정 상황판</h1>
-          <p>{DEMO_MODE ? '시연용 로그인 화면입니다. 실제 인증·접근 제어 기능은 없습니다.' : '로그인 후 사용가능 합니다.'}</p>
+          <p>{DEMO_LOGIN_MODE ? '시연용 로그인 화면입니다. 실제 인증·접근 제어 기능은 없습니다.' : '로그인 후 사용가능 합니다.'}</p>
         </header>
         <form onSubmit={handleSubmit} noValidate>
           <div className="login-field">

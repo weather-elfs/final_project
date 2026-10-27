@@ -3,6 +3,7 @@ import { alertOperationsFixture, historyRecords } from './mocks/operationsFixtur
 
 // 공개 시연용 화면 모드다. 인증·인가 또는 비밀 자격증명으로 사용하지 않는다.
 export const DEMO_MODE = import.meta.env?.MODE === 'demo';
+export const DEMO_LOGIN_MODE = DEMO_MODE || (import.meta.env?.DEV && import.meta.env.MODE === 'backend');
 export const DEMO_CENTER = { id: '33182', name: '시연 관제센터' };
 
 export function matchesDemoLogin(centerId: string, accessCode: string) {
