@@ -81,6 +81,7 @@
   overflow-wrap: anywhere;
   text-align: center;
   vertical-align: middle;
+  word-break: keep-all;
 }
 
 .forecast-table th:first-child {
@@ -138,5 +139,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.forecast-input-status td { color: #805500; font-size: 0.75rem; }
-.forecast-input-status strong, .forecast-input-status small { display: block; line-height: 1.5; }
+.forecast-input-status td {
+  color: #805500;
+  font-size: 0.75rem;
+}
+.forecast-input-status strong,
+.forecast-input-status small {
+  display: block;
+  line-height: 1.5;
+}
