@@ -143,3 +143,12 @@ test('예보 발표·수집 시각은 관측 시각과 구분하고 일부 누�
   assert.match(message, /해당 시점의 예보가 없거나 오래됐습니다/);
   assert.doesNotMatch(message, /미수신/);
 });
+
+test('재사용 PM은 각 값의 실제 관측 시각과 이전 값 안내를 표시한다', () => {
+  const markup = renderSummary({ current: { pm25UgM3: 10, pm10UgM3: 31, pm25Reused: true, pm10Reused: true, pm25ObservedAt: '2026-10-27T10:00:00+09:00', pm10ObservedAt: '2026-10-27T10:00:00+09:00' } });
+  assert.match(markup, /10 µg\/m³/);
+  assert.equal((markup.match(/10:00:00 관측 · 이전 값/g) ?? []).length, 2);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'delayed', reason: 'PREVIOUS_OBSERVATION_USED', observedAt: '2026-10-27T10:00:00+09:00' }), /이전 정상 관측값을 사용합니다. · 관측 10:00:00/);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'partial', reason: 'UPSTREAM_COMMUNICATION_FAILURE' }), /에어코리아 관측소에서 미세먼지 통신장애/);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'delayed', reason: 'UPSTREAM_COMMUNICATION_FAILURE_REUSED' }), /통신장애로 2시간 이내 이전 정상 관측값/);
+});

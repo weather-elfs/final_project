@@ -30,6 +30,8 @@ export function sourceStatusMessage(source: SourceStatusDetail) {
     return `${presentation.tone === 'good' ? '예보 수신' : SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '예보 일부 누락'}${times ? ` · ${times}` : ''}`;
   }
   const observedTime = source.observedAt ? formatKstTime(source.observedAt) : '';
+  if (source.reason?.startsWith('UPSTREAM_COMMUNICATION_FAILURE')) return `${SOURCE_FAILURE_MESSAGES[source.reason]}${observedTime ? ` · 관측 ${observedTime}` : ''}`;
+  if (source.reason === 'PREVIOUS_OBSERVATION_USED') return `${SOURCE_FAILURE_MESSAGES.PREVIOUS_OBSERVATION_USED}${observedTime ? ` · 관측 ${observedTime}` : ''}`;
   if (source.status.toUpperCase() === 'PARTIAL') return `${SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '일부 관측값 누락'}${observedTime ? ` · 관측 ${observedTime}` : ''}`;
   if (presentation.tone === 'good') return observedTime ? `${observedTime} 수신` : '정상 수신';
   if (presentation.tone === 'delayed') return `${elapsedLabel(source.ageMinutes)}${observedTime ? ` · 정상 ${observedTime}` : ''}`;
@@ -59,7 +61,9 @@ export default function CollectionStatus({ dashboard, loading, retryingSource, o
 
   return <div className="data-status-list">
     {sources.length ? sources.map((source) => {
-      const presentation = sourceStatusPresentation(source.status);
+      const presentation = source.reason?.startsWith('UPSTREAM_COMMUNICATION_FAILURE')
+        ? { label: '관측소 통신장애', tone: 'error' } as const
+        : sourceStatusPresentation(source.status);
       const label = SOURCE_LABELS[source.source.toUpperCase()] ?? source.source;
       const error = errors[source.source];
       return <details className="data-status-row" key={source.source}>

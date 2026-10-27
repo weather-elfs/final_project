@@ -558,3 +558,9 @@
 .metric-grid strong {
   font-size: 16px;
 }
+.metric-grid small { display: block; color: var(--muted); font-size: 0.75rem; line-height: 1.3; }
+
+@media (min-width: 43.751rem) {
+  .current-weather-panel.has-reused-observations { height: 456px; }
+  .has-reused-observations .metric-grid { height: auto; }
+}

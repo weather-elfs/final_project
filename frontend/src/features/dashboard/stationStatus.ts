@@ -14,6 +14,9 @@ export const SOURCE_FAILURE_MESSAGES: Record<string, string> = {
   TARGET_TIME_MISSING_OR_STALE: '해당 시점의 예보가 없거나 오래됐습니다.',
   STALE_OR_FUTURE_OBSERVATION: '사용할 수 있는 최신 관측이 없습니다.',
   BASELINE_MISSING: '예측 기준이 되는 일부 관측값이 없습니다.',
+  UPSTREAM_COMMUNICATION_FAILURE: '에어코리아 관측소에서 미세먼지 통신장애를 보고했습니다.',
+  UPSTREAM_COMMUNICATION_FAILURE_REUSED: '에어코리아 관측소 통신장애로 2시간 이내 이전 정상 관측값을 사용합니다.',
+  PREVIOUS_OBSERVATION_USED: '2시간 이내 이전 정상 관측값을 사용합니다.',
 };
 
 export function normalizeCurrentStatus(status?: string): StationCurrentStatus {

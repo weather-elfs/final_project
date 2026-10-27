@@ -33,7 +33,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
   const lastRefreshAt = dashboard?.meta?.generatedAt;
   const errors = dashboard?.apiStatus?.summary?.fail ?? 0;
   const delayed = dashboard?.apiStatus?.summary?.delayed ?? 0;
-  const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `일부 누락 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
+  const statusLabel = !dashboard ? loading ? '조회 중' : '자료 없음' : errors ? `자료 확인 ${errors}` : delayed ? `지연 ${delayed}` : '정상';
   const statusTone = !dashboard ? 'delayed' : errors ? 'error' : delayed ? 'delayed' : 'good';
   const fogGrade = fogGradeByVisibility(current?.visibilityKm);
   const serverAqi = current?.aqi;
@@ -80,7 +80,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
   }, [statusOpen]);
 
   return (
-    <section className="panel current-weather-panel" aria-labelledby="current-weather-title" aria-busy={loading}>
+    <section className={`panel current-weather-panel${current?.pm25Reused || current?.pm10Reused ? ' has-reused-observations' : ''}`} aria-labelledby="current-weather-title" aria-busy={loading}>
       {loading && <CardLoadingOverlay label="현재 기상 조회 중" />}
       <div className="panel-header current-weather-header">
         <h2 id="current-weather-title">현재 기상</h2>
@@ -216,8 +216,8 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
 
       <h3 className="related-title">시정 관련 관측 지표</h3>
       <div className="metric-grid">
-        <div><span>PM2.5</span><strong>{metric(current?.pm25UgM3, 'µg/m³')}</strong></div>
-        <div><span>PM10</span><strong>{metric(current?.pm10UgM3, 'µg/m³')}</strong></div>
+        <div><span>PM2.5</span><strong>{metric(current?.pm25UgM3, 'µg/m³')}</strong>{current?.pm25Reused && <small>{formatKstTime(current.pm25ObservedAt ?? undefined)} 관측 · 이전 값</small>}</div>
+        <div><span>PM10</span><strong>{metric(current?.pm10UgM3, 'µg/m³')}</strong>{current?.pm10Reused && <small>{formatKstTime(current.pm10ObservedAt ?? undefined)} 관측 · 이전 값</small>}</div>
         <div><span>상대습도</span><strong>{metric(current?.relativeHumidityPct, '%')}</strong></div>
         <div><span>기온−이슬점</span><strong>{metric(current?.temperatureDewpointSpreadC, '°C', 1)}</strong></div>
       </div>
