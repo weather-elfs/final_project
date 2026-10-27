@@ -1,12 +1,30 @@
-from fastapi import FastAPI
+import logging
+import math
 import uuid
-from fastapi.responses import JSONResponse
 from datetime import timedelta
-from backend.model_predict import predict_visibility_pm
-from backend.kma_weather import asos_wind_direction, fetch_realtime_weather
-from fastapi.middleware.cors import CORSMiddleware
+
 from backend.aqi import calculate_current_aqi
-from backend.airkorea_live import read_live_airkorea
+from backend.forecast_inputs import ForecastError, read_forecasts
+from backend.kma_weather import (
+    asos_wind_direction,
+    fetch_realtime_weather,
+    weather_label,
+)
+from backend.live_observations import (
+    SOURCES,
+    CollectionError,
+    observation_history,
+    refresh_observations,
+)
+from backend.model_predict import (
+    METADATA_PATH,
+    MODEL_PATHS,
+    predict_visibility_pm,
+    read_model_history,
+)
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
 
@@ -40,7 +58,7 @@ def health():
     return {"status": "OK"}
 
 
-from fastapi import Query, HTTPException
+from fastapi import HTTPException, Query
 
 STATIONS = [
     {
@@ -86,32 +104,6 @@ MARINE_MAPPING = {
 }
 
 
-# 관측소 상태 확인 함수
-def get_station_current_status(conn, station_id):
-    sql = """
-        SELECT tm
-        FROM public.raw_weather_asos_realtime
-        WHERE stn_id = %s
-        ORDER BY tm DESC
-        LIMIT 1
-    """
-
-    with conn.cursor() as cur:
-        cur.execute(sql, (station_id,))
-        row = cur.fetchone()
-
-    if row is None:
-        return "FAIL"
-
-    # 현재 시각 기준으로 관측자료 최신성 확인
-    current_time = datetime.now(KST).replace(tzinfo=None)
-
-    status = get_data_status(row["tm"], current_time)
-
-    # 대시보드 설정 API에서 사용하는 상태
-    return "SUCCESS" if status == "OK" else "FAIL"
-
-
 @app.get("/api/v1/dashboard/config")
 def dashboard_config(
     south: float | None = Query(None),
@@ -142,23 +134,21 @@ def dashboard_config(
 
     stations = []
 
-    # PostgreSQL에서 실제 관측소 상태 조회
-    try:
-        with get_connection() as conn:
-            for station in selected_stations:
-                current_status = get_station_current_status(conn, station["station_id"])
-
-                stations.append(
-                    {
-                        **station,
-                        "available": True,
-                        "current_status": current_status,
-                        "forecast_status": "FAIL",
-                    }
-                )
-
-    except Exception:
-        raise HTTPException(status_code=503, detail="관측소 상태 조회에 실패했습니다.")
+    for station in selected_stations:
+        stations.append(
+            {
+                **station,
+                "available": True,
+                # 아직 수집하지 않은 관측소를 정상으로 표시하지 않는다.
+                "current_status": "UNKNOWN",
+                "forecast_status": (
+                    "SUCCESS"
+                    if all(path.is_file() for path in MODEL_PATHS.values())
+                    and METADATA_PATH.is_file()
+                    else "FAIL"
+                ),
+            }
+        )
 
     return {
         "code": "SUCCESS",
@@ -182,13 +172,15 @@ def dashboard_config(
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+
 from backend.database import get_connection
 
 KST = timezone(timedelta(hours=9))
 
 
 def json_number(value):
-    return float(value) if isinstance(value, Decimal) else value
+    value = float(value) if isinstance(value, Decimal) else value
+    return None if isinstance(value, float) and not math.isfinite(value) else value
 
 
 # AirKorea 데이터 조회 함수
@@ -220,6 +212,10 @@ def get_airkorea_data(conn, station_id, observed_at):
     if row is None:
         return None
 
+    return format_airkorea(row)
+
+
+def format_airkorea(row):
     return {
         "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
         "station_name": row["station_name"],
@@ -266,8 +262,12 @@ def get_marine_data(conn, station_id, observed_at):
     if row is None:
         return None
 
+    return format_marine(row, mapping["source"])
+
+
+def format_marine(row, source="TIDE_OBSERVATORY"):
     return {
-        "source": mapping["source"],
+        "source": source,
         "station_name": row["stn_name"],
         "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
         "water_temperature_c": json_number(row["water_temp"]),
@@ -359,11 +359,6 @@ AIR_STATION_MAP = {
 
 
 def get_station_aqi(conn, station_id, observed_at):
-    import csv
-    import math
-    from pathlib import Path
-    from datetime import datetime, timedelta
-
     empty = calculate_current_aqi([], [])
 
     if observed_at is None:
@@ -381,49 +376,7 @@ def get_station_aqi(conn, station_id, observed_at):
 
     anchor = observed_at.replace(tzinfo=None, minute=0, second=0, microsecond=0)
 
-    root = Path(__file__).resolve().parents[1]
-
-    csv_files = [
-        root / "src/collectors/api/data/raw/airkorea/airkorea_realtime_3stations.csv",
-        root / "data/raw/airkorea/airkorea_realtime_3stations.csv",
-    ]
-
-    csv_files = sorted(
-        [p for p in csv_files if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-    )
-
-    hourly = {}
-
-    def numeric(value):
-        try:
-            number = float(value)
-            return number if math.isfinite(number) and number >= 0 else None
-        except (TypeError, ValueError):
-            return None
-
-    for path in csv_files:
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            for record in csv.DictReader(f):
-                if str(record.get("측정소코드", "")).strip() != code:
-                    continue
-
-                try:
-                    tm = datetime.fromisoformat(record["날짜"])
-                    tm = tm.replace(tzinfo=None)
-                except (ValueError, TypeError, KeyError):
-                    continue
-
-                if tm.minute != 0 or tm.second != 0:
-                    continue
-
-                if anchor - timedelta(hours=11) <= tm <= anchor:
-                    hourly[tm] = (
-                        numeric(record.get("PM2.5")),
-                        numeric(record.get("PM10")),
-                    )
-
-    # 과거 DB 데이터도 조회해 CSV 누락 시 사용
+    # 현재 표시·모델·AQI가 같은 DB 스냅샷을 사용한다. CSV로 덮어쓰지 않는다.
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -446,22 +399,18 @@ def get_station_aqi(conn, station_id, observed_at):
     pm25 = []
     pm10 = []
 
-    for index, row in enumerate(db_rows):
-        tm = anchor - timedelta(hours=index)
-        live25, live10 = hourly.get(tm, (None, None))
-
+    for row in db_rows:
         db25 = row["pm25"] if isinstance(row, dict) else row[0]
         db10 = row["pm10"] if isinstance(row, dict) else row[1]
-
-        pm25.append(live25 if live25 is not None else db25)
-        pm10.append(live10 if live10 is not None else db10)
+        pm25.append(db25)
+        pm10.append(db10)
 
     return calculate_current_aqi(pm25, pm10)
 
 
 # 예측 시정거리 기준 안개등급 분류
 def get_fog_grade_label(visibility_km: float) -> str:
-    if visibility_km > 10:
+    if visibility_km >= 10:
         return "안개 없음"
     elif visibility_km >= 2:
         return "옅은 안개"
@@ -586,7 +535,6 @@ def get_diagnosis_summary(
 @app.get(
     "/api/v1/stations/{station_id}/dashboard",
     summary="선택 관측소 대시보드 조회",
-    description="관측 데이터, 예측 시정거리, 임무 판정 결과를 조회합니다.",
     responses={
         200: {
             "description": "대시보드 조회 성공 또는 일부 기능 준비 중",
@@ -671,7 +619,7 @@ def get_diagnosis_summary(
             },
         },
         503: {
-            "description": "DB 데이터 조회 실패",
+            "description": "최신 수집·적재 실패(LATEST_DATA_UNAVAILABLE), 예보 입력 실패(FORECAST_INPUT_UNAVAILABLE), 예측 실패(FORECAST_FAILED), DB 조회 실패(DB_ERROR)",
             "content": {
                 "application/json": {
                     "example": {
@@ -702,7 +650,23 @@ def station_dashboard(
         default=False,
         description="프론트엔드 연동 테스트용 Mock 예측 데이터 사용 여부",
     ),
+    collection_id: str | None = Query(
+        default=None,
+        max_length=64,
+        description="부분 수집 응답의 meta.collection.id. 재시도 시 원래 조회 조건을 유지합니다.",
+    ),
+    retry_source: str | None = Query(
+        default=None,
+        description="실패 출처만 재시도: ASOS, AIRKOREA, TIDE_OBSERVATORY, KMA_FORECAST, AIRKOREA_FORECAST",
+    ),
 ):
+    """일반 조회는 최신 관측·시계열·기상청 단기예보·AirKorea PM2.5 예보를 API에서 수집하고 메모리에서 예측합니다. DB 연결·적재는 하지 않습니다.
+
+    기관별 공개 주기가 달라 관측 시각은 요청 시각과 다를 수 있습니다.
+    실제 입력 시각은 data.meta.collection.model_input_observed_at에 포함됩니다.
+    예보 입력·발표시각은 data.meta.forecasts, 모델·결측 입력 정보는 data.meta.model에 포함됩니다.
+    as_of 과거 조회와 인천 mock=true 시연은 최신 수집을 수행하지 않습니다.
+    """
     if station_id not in ("102", "112", "201"):
         return JSONResponse(
             status_code=404,
@@ -744,6 +708,58 @@ def station_dashboard(
             },
         )
 
+    collection = None
+    horizons = [forecast_interval_h * i for i in range(1, 5)]
+    if (
+        bool(collection_id) != bool(retry_source)
+        or (retry_source and retry_source not in SOURCES)
+        or ((collection_id or retry_source) and (as_of is not None or mock))
+    ):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "INVALID_PARAMETER",
+                "message": "재시도 ID·출처와 기존 실시간 조회 조건을 확인하세요.",
+            },
+        )
+    if as_of is None and not (mock and station_id == "112"):
+        try:
+            collection = (
+                refresh_observations(
+                    station_id,
+                    horizons=horizons,
+                    collection_id=collection_id,
+                    retry_source=retry_source,
+                )
+                if retry_source
+                else refresh_observations(station_id, horizons=horizons)
+            )
+        except CollectionError as exc:
+            print(
+                f"최신 수집 실패: {exc.source} / {exc.reason} / {type(exc.__cause__).__name__}",
+                flush=True,
+            )
+            return JSONResponse(
+                status_code=409 if exc.source == "REQUEST" else 503,
+                content={
+                    "code": (
+                        exc.reason
+                        if exc.source == "REQUEST"
+                        else "LATEST_DATA_UNAVAILABLE"
+                    ),
+                    "message": (
+                        "재시도할 자료가 만료되었거나 조회 조건이 다릅니다. 전체 갱신을 실행하세요."
+                        if exc.source == "REQUEST"
+                        else "최신 관측·예보 수집을 처리하지 못했습니다."
+                    ),
+                    "data": {
+                        "source": exc.source,
+                        "reason": exc.reason,
+                        "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                    },
+                },
+            )
+
     # 조회 모드에 따라 ASOS 테이블 선택
     # 날짜 미지정: 실시간 테이블
     # 날짜 지정: 과거 데이터 테이블
@@ -776,46 +792,115 @@ def station_dashboard(
 
     try:
         # 과거 관측 시각을 지정한 경우 해당 시각으로 조회
-        query_time = as_of.replace(tzinfo=None) if as_of is not None else None
+        query_time = (
+            as_of.astimezone(KST).replace(tzinfo=None)
+            if as_of is not None and as_of.tzinfo is not None
+            else as_of
+        )
+        if collection is not None:
+            query_time = collection["base_time"]
 
-        with get_connection() as conn:
-            # ASOS 관측 데이터 조회
-            with conn.cursor() as cur:
-                cur.execute(sql, (station_id, query_time, query_time))
-                row = cur.fetchone()
-
-            # ASOS 관측 시각 기준 AirKorea 데이터 조회
+        if collection is not None:
+            observations = collection["observations"]
+            latest = {
+                source: max(
+                    (r for r in records if r["tm"] <= query_time),
+                    key=lambda r: r["tm"],
+                    default=None,
+                )
+                for source, records in observations.items()
+            }
+            row = latest["ASOS"] or {
+                "_missing": True,
+                **dict.fromkeys(
+                    (
+                        "temp",
+                        "humidity",
+                        "dew_point",
+                        "wind_speed",
+                        "wind_dir",
+                        "sea_press",
+                        "rainfall",
+                        "cloud",
+                        "visibility",
+                    )
+                ),
+                "tm": query_time,
+                "stn_id": station_id,
+                "stn_ko": next(
+                    s["station_name"] for s in STATIONS if s["station_id"] == station_id
+                ),
+            }
             airkorea = (
-                get_airkorea_data(conn, station_id, row["tm"])
-                if row is not None
-                else None
+                format_airkorea(latest["AIRKOREA"]) if latest["AIRKOREA"] else None
             )
-            # AirKorea 관측 시각 기준 현재 AQI 계산
-            aqi_time = (
-                datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
-                if airkorea is not None
-                else None
-            )
-
-            current_aqi = get_station_aqi(
-                conn,
-                station_id,
-                aqi_time,
-            )
-
-            # 해양 데이터 조회
             marine = (
-                get_marine_data(conn, station_id, row["tm"])
-                if row is not None
+                format_marine(latest["TIDE_OBSERVATORY"])
+                if latest["TIDE_OBSERVATORY"]
                 else None
             )
-    except Exception as e:
-        print("DB 조회 오류:", repr(e))
+            anchor = (
+                latest["AIRKOREA"]["tm"] if latest["AIRKOREA"] else query_time
+            ).replace(minute=0, second=0, microsecond=0)
+            air_hours = {r["tm"]: r for r in observations["AIRKOREA"]}
+            hours = [air_hours.get(anchor - timedelta(hours=i), {}) for i in range(12)]
+            current_aqi = calculate_current_aqi(
+                [r.get("pm25") for r in hours], [r.get("pm10") for r in hours]
+            )
+            model_history = observation_history(observations, query_time)
+            forecast_inputs = collection["forecast_inputs"]
+        else:
+            with get_connection() as conn:
+                conn.execute(
+                    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+                )
+                with conn.cursor() as cur:
+                    cur.execute(sql, (station_id, query_time, query_time))
+                    row = cur.fetchone()
+                airkorea = (
+                    get_airkorea_data(conn, station_id, row["tm"])
+                    if row is not None
+                    else None
+                )
+                aqi_time = (
+                    datetime.fromisoformat(airkorea["observed_at"]).replace(tzinfo=None)
+                    if airkorea is not None
+                    else None
+                )
+                current_aqi = get_station_aqi(conn, station_id, aqi_time)
+                marine = (
+                    get_marine_data(conn, station_id, row["tm"])
+                    if row is not None
+                    else None
+                )
+                forecast_inputs, model_history = {}, []
+                if row is not None and not (mock and station_id == "112"):
+                    forecast_inputs = read_forecasts(
+                        conn, station_id, row["tm"], horizons
+                    )
+                    model_history = read_model_history(
+                        conn, station_id, row["tm"], asos_table
+                    )
+    except ForecastError as exc:
         return JSONResponse(
             status_code=503,
             content={
-                "code": "DB_ERROR",
-                "message": "DB 데이터 조회에 실패했습니다.",
+                "code": "FORECAST_INPUT_UNAVAILABLE",
+                "message": "요청 시점에 맞는 예보 입력이 없어 예측을 실행하지 않았습니다.",
+                "data": {
+                    "source": exc.source,
+                    "reason": exc.reason,
+                    "meta": {"request_id": f"req_{uuid.uuid4().hex}"},
+                },
+            },
+        )
+    except Exception as e:
+        print("입력 구성 오류:", type(e).__name__, flush=True)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": "LATEST_DATA_UNAVAILABLE" if collection else "DB_ERROR",
+                "message": "예측 입력 구성에 실패했습니다.",
                 "data": {"meta": {"request_id": f"req_{uuid.uuid4().hex}"}},
             },
         )
@@ -835,17 +920,22 @@ def station_dashboard(
 
     # 상태 판정 기준 시각
     reference_time = (
-        as_of.replace(tzinfo=None)
-        if as_of is not None
-        else datetime.now(KST).replace(tzinfo=None)
+        query_time if as_of is not None else datetime.now(KST).replace(tzinfo=None)
     )
-    # 현재 조회는 실시간 CSV를 화면 표시용으로 사용
-    live_air = read_live_airkorea(station_id, reference_time) if as_of is None else None
+    display_airkorea = airkorea
 
-    display_airkorea = live_air["current"] if live_air is not None else airkorea
-
-    # ASOS 상태
-    asos_status = get_data_status(row["tm"], reference_time)
+    asos_time = (
+        (
+            datetime.fromisoformat(
+                collection["model_input_observed_at"]["ASOS"]
+            ).replace(tzinfo=None)
+            if collection and collection["model_input_observed_at"].get("ASOS")
+            else None
+        )
+        if collection
+        else row["tm"]
+    )
+    asos_status = get_data_status(asos_time, reference_time)
 
     # AirKorea 상태
     airkorea_time = (
@@ -866,18 +956,6 @@ def station_dashboard(
 
     if aqi_age_hours is None or aqi_age_hours < 0 or aqi_age_hours > AQI_MAX_AGE_HOURS:
         current_aqi = calculate_current_aqi([], [])
-
-    # 실시간 AirKorea CSV 기반 AQI 계산
-    if (
-        as_of is None
-        and live_air is not None
-        and aqi_age_hours is not None
-        and 0 <= aqi_age_hours <= AQI_MAX_AGE_HOURS
-    ):
-        current_aqi = calculate_current_aqi(
-            live_air["pm25_history"],
-            live_air["pm10_history"],
-        )
 
     # 해양 데이터 상태
 
@@ -929,8 +1007,9 @@ def station_dashboard(
 
     # CatBoost 시간대별 예측 (4개 시점)
     real_forecast_timeline = []
+    missing_features = set()
 
-    if not is_mock and airkorea is not None and marine is not None:
+    if not is_mock:
         for h in range(
             forecast_interval_h,
             forecast_interval_h * 4 + 1,
@@ -943,16 +1022,43 @@ def station_dashboard(
                     observed_at=row["tm"],
                     h=h,
                     asos=row,
-                    airkorea=airkorea,
-                    marine=marine,
+                    airkorea=airkorea
+                    or dict.fromkeys(
+                        ("pm25_ug_m3", "pm10_ug_m3", "so2", "no2", "o3", "co")
+                    ),
+                    marine=marine
+                    or dict.fromkeys(
+                        (
+                            "water_temperature_c",
+                            "air_temperature_c",
+                            "salinity_psu",
+                            "wind_speed_m_s",
+                            "wind_direction_deg",
+                            "air_pressure_hpa",
+                        )
+                    ),
+                    history=model_history,
+                    forecast=forecast_inputs[h],
                 )
-
-                predicted_visibility = max(
-                    0.0,
-                    prediction["visibility_km"],
+                missing_features.update(prediction.get("missing_features", []))
+                values = {
+                    key: json_number(prediction.get(key))
+                    for key in ("visibility_km", "pm25", "pm10")
+                }
+                unavailable = [key for key, value in values.items() if value is None]
+                missing_sources = sorted(
+                    set(forecast_inputs[h].get("missing_sources", []))
+                    | {
+                        source
+                        for source in (collection or {}).get("errors", {})
+                        if source in ("ASOS", "AIRKOREA", "TIDE_OBSERVATORY")
+                    }
                 )
+                predicted_visibility = values["visibility_km"]
 
-                if predicted_visibility >= 10:
+                if predicted_visibility is None:
+                    visibility_grade = None
+                elif predicted_visibility >= 10:
                     visibility_grade = "GOOD"
                 elif predicted_visibility >= 4:
                     visibility_grade = "MODERATE"
@@ -967,11 +1073,39 @@ def station_dashboard(
                         "valid_at": (
                             row["tm"].replace(tzinfo=KST) + timedelta(hours=h)
                         ).isoformat(),
-                        "visibility_pred_km": round(predicted_visibility, 2),
+                        "visibility_pred_km": (
+                            round(predicted_visibility, 2)
+                            if predicted_visibility is not None
+                            else None
+                        ),
                         "visibility_grade": visibility_grade,
-                        "fog_grade_label": get_fog_grade_label(predicted_visibility),
-                        "pm25_pred_ug_m3": round(max(0.0, prediction["pm25"]), 2),
-                        "pm10_pred_ug_m3": round(max(0.0, prediction["pm10"]), 2),
+                        "fog_grade_label": (
+                            get_fog_grade_label(predicted_visibility)
+                            if predicted_visibility is not None
+                            else None
+                        ),
+                        "pm25_pred_ug_m3": (
+                            round(values["pm25"], 2)
+                            if values["pm25"] is not None
+                            else None
+                        ),
+                        "pm10_pred_ug_m3": (
+                            round(values["pm10"], 2)
+                            if values["pm10"] is not None
+                            else None
+                        ),
+                        "status": (
+                            "unavailable"
+                            if len(unavailable) == 3
+                            else (
+                                "degraded"
+                                if missing_sources or unavailable
+                                else "ready"
+                            )
+                        ),
+                        "missing_sources": missing_sources,
+                        "missing_features": prediction.get("missing_features", []),
+                        "unavailable_targets": unavailable,
                     }
                 )
 
@@ -981,10 +1115,30 @@ def station_dashboard(
                     repr(e),
                     flush=True,
                 )
-                break
+                real_forecast_timeline.append(
+                    {
+                        "horizon_h": h,
+                        "valid_at": (
+                            row["tm"].replace(tzinfo=KST) + timedelta(hours=h)
+                        ).isoformat(),
+                        "visibility_pred_km": None,
+                        "pm25_pred_ug_m3": None,
+                        "pm10_pred_ug_m3": None,
+                        "status": "unavailable",
+                        "reason": "MODEL_ERROR",
+                        "unavailable_targets": ["visibility_km", "pm25", "pm10"],
+                    }
+                )
     selected_forecast_timeline = (
         mock_forecast_timeline if is_mock else real_forecast_timeline
     )
+
+    if collection is not None:
+        logging.getLogger("uvicorn.error").info(
+            "[예측 완료] 관측소 %s / 예측 간격 %s시간 / 4개 시점",
+            station_id,
+            forecast_interval_h,
+        )
 
     forecast_summary = get_forecast_summary(selected_forecast_timeline)
 
@@ -994,21 +1148,97 @@ def station_dashboard(
         is_mock=is_mock,
     )
 
+    if collection and any(p.get("status") != "ready" for p in real_forecast_timeline):
+        mission_evaluation = get_mission_evaluation(mission_type, None, False)
+        mission_evaluation["reason_codes"] = ["INPUT_INCOMPLETE"]
+
+    source_status = [
+        {
+            "source": source,
+            **to_contract_source_status(get_source_detail(tm, reference_time)),
+        }
+        for source, tm in (
+            ("ASOS", asos_time),
+            ("AIRKOREA", airkorea_time),
+            ("TIDE_OBSERVATORY", marine_time),
+        )
+    ]
+    if collection:
+        for source, key in (
+            ("KMA_FORECAST", "kma_issued_at"),
+            ("AIRKOREA_FORECAST", "airkorea_issued_at"),
+        ):
+            issued = max(
+                (f[key] for f in forecast_inputs.values() if f.get(key)), default=None
+            )
+            source_status.append(
+                {
+                    "source": source,
+                    "status": "fresh",
+                    "observed_at": None,
+                    "issued_at": issued,
+                    "collected_at": collection.get("fetched_at", {}).get(source),
+                    "age_minutes": None,
+                    "reason": None,
+                }
+            )
+        for source in source_status:
+            if source["source"] in collection.get("errors", {}):
+                source.update(
+                    status=(
+                        "partial"
+                        if source.get("observed_at") or source.get("issued_at")
+                        else "missing"
+                    ),
+                    reason=collection["errors"][source["source"]],
+                )
+        first = next(
+            (
+                f
+                for f in forecast_inputs.values()
+                if math.isfinite(f["values"].get("future_fcst_sky", float("nan")))
+                and math.isfinite(f["values"].get("future_fcst_pty", float("nan")))
+            ),
+            None,
+        )
+        kma_forecast = (
+            {
+                "source": "KMA_VILAGE_FORECAST",
+                "forecast_at": first["valid_at"],
+                "weather_label": weather_label(
+                    str(int(first["values"]["future_fcst_sky"])),
+                    str(int(first["values"]["future_fcst_pty"])),
+                ),
+            }
+            if first
+            else None
+        )
+    else:
+        kma_forecast = fetch_realtime_weather(station_id)
+
     return {
         "code": "PARTIAL_SUCCESS",
         "message": (
-            "관측 데이터 조회 성공. 프런트엔드 테스트용 Mock 예측데이터이며 실제 임무 판정은 수행하지 않습니다."
-            if is_mock
+            "받은 자료와 가능한 예측을 표시합니다. 누락 출처는 개별 재시도할 수 있습니다."
+            if collection
+            and (
+                collection.get("errors")
+                or any(p.get("status") != "ready" for p in real_forecast_timeline)
+            )
             else (
-                "관측 데이터 조회 및 CatBoost 예측 완료. 해상 수송·보급 임무 기준 판정을 수행했습니다. 일부 기능은 준비 중입니다."
-                if (
-                    len(real_forecast_timeline) == 4
-                    and mission_evaluation["evaluation_status"] == "EVALUATED"
-                )
+                "관측 데이터 조회 성공. 프런트엔드 테스트용 Mock 예측데이터이며 실제 임무 판정은 수행하지 않습니다."
+                if is_mock
                 else (
-                    "관측 데이터 조회 및 CatBoost 예측 완료. 임무 판정은 수행되지 않았습니다."
-                    if len(real_forecast_timeline) == 4
-                    else "관측 데이터 조회 성공. 예측 결과가 없거나 일부만 생성되었습니다."
+                    "관측 데이터 조회 및 CatBoost 예측 완료. 해상 수송·보급 임무 기준 판정을 수행했습니다. 일부 기능은 준비 중입니다."
+                    if (
+                        len(real_forecast_timeline) == 4
+                        and mission_evaluation["evaluation_status"] == "EVALUATED"
+                    )
+                    else (
+                        "관측 데이터 조회 및 CatBoost 예측 완료. 임무 판정은 수행되지 않았습니다."
+                        if len(real_forecast_timeline) == 4
+                        else "관측 데이터 조회 성공. 예측 결과가 없거나 일부만 생성되었습니다."
+                    )
                 )
             )
         ),
@@ -1027,7 +1257,7 @@ def station_dashboard(
                 ],
                 "mission_type": mission_type,
             },
-            "kma_forecast": (kma_forecast := fetch_realtime_weather(station_id)),
+            "kma_forecast": kma_forecast,
             "current": {
                 "weather_label": (
                     kma_forecast.get("weather_label") if kma_forecast else None
@@ -1038,7 +1268,9 @@ def station_dashboard(
                 "weather_forecast_at": (
                     kma_forecast.get("forecast_at") if kma_forecast else None
                 ),
-                "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
+                "observed_at": (
+                    asos_time.replace(tzinfo=KST).isoformat() if asos_time else None
+                ),
                 "temperature_c": json_number(row["temp"]),
                 "relative_humidity_pct": json_number(row["humidity"]),
                 "temperature_dewpoint_spread_c": (
@@ -1055,7 +1287,7 @@ def station_dashboard(
                     "wind_direction_label"
                 ],
                 "status": to_contract_source_status(
-                    get_source_detail(row["tm"], reference_time)
+                    get_source_detail(asos_time, reference_time)
                 )["status"],
                 "pm10_ug_m3": (
                     display_airkorea["pm10_ug_m3"] if display_airkorea else None
@@ -1066,26 +1298,7 @@ def station_dashboard(
                 "aqi": current_aqi,
             },
             "marine": marine,
-            "source_status": [
-                {
-                    "source": "ASOS",
-                    **to_contract_source_status(
-                        get_source_detail(row["tm"], reference_time)
-                    ),
-                },
-                {
-                    "source": "AIRKOREA",
-                    **to_contract_source_status(
-                        get_source_detail(airkorea_time, reference_time)
-                    ),
-                },
-                {
-                    "source": "TIDE_OBSERVATORY",
-                    **to_contract_source_status(
-                        get_source_detail(marine_time, reference_time)
-                    ),
-                },
-            ],
+            "source_status": source_status,
             "forecast_timeline": selected_forecast_timeline,
             "forecast_summary": forecast_summary,
             "mission_evaluation": mission_evaluation,
@@ -1106,6 +1319,40 @@ def station_dashboard(
                 "generated_at": datetime.now(KST).isoformat(),
                 "partial": True,
                 "mock": is_mock,
+                "model": (
+                    None
+                    if is_mock
+                    else {
+                        "name": "catboost_observation_forecast_tuned",
+                        "transform": "expm1(log1p(current) + predicted_residual * sigma[h])",
+                        "missing_features": sorted(missing_features),
+                        "origin_at": row["tm"].replace(tzinfo=KST).isoformat(),
+                    }
+                ),
+                "forecasts": (
+                    [
+                        {
+                            "horizon_h": h,
+                            **forecast_inputs[h],
+                            "values": {
+                                k: json_number(v)
+                                for k, v in forecast_inputs[h]["values"].items()
+                            },
+                        }
+                        for h in horizons
+                    ]
+                    if not is_mock
+                    else []
+                ),
+                "collection": (
+                    {
+                        key: value
+                        for key, value in collection.items()
+                        if key not in ("base_time", "observations", "forecast_inputs")
+                    }
+                    if collection is not None
+                    else None
+                ),
             },
         },
     }

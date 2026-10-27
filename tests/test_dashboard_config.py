@@ -1,28 +1,26 @@
 from unittest.mock import patch
+
+from backend.main import STATIONS, app
 from fastapi.testclient import TestClient
-from backend.main import app, STATIONS
 
 client = TestClient(app)
 
 
-def fake_station_status(conn, station_id):
-    return "SUCCESS"
-
-
 def test_config_without_bounds():
-    with patch("backend.main.get_connection"), patch(
-        "backend.main.get_station_current_status",
-        side_effect=fake_station_status,
-    ):
+    with patch(
+        "backend.main.get_connection", side_effect=AssertionError("DB must not be used")
+    ) as connect:
         response = client.get("/api/v1/dashboard/config")
 
     assert response.status_code == 200, response.text
+    connect.assert_not_called()
 
     result = response.json()
     assert result["code"] == "SUCCESS"
 
     data = result["data"]
     assert len(data["stations"]) == len(STATIONS)
+    assert all(station["current_status"] == "UNKNOWN" for station in data["stations"])
     assert data["forecast_interval_options_h"] == [1, 3, 6, 12]
     assert data["forecast_slots"] == 4
     assert isinstance(data["mission_types"], list)
@@ -40,16 +38,16 @@ def test_config_with_bounds():
         "east": station["longitude"] + 0.01,
     }
 
-    with patch("backend.main.get_connection"), patch(
-        "backend.main.get_station_current_status",
-        side_effect=fake_station_status,
-    ):
+    with patch(
+        "backend.main.get_connection", side_effect=AssertionError("DB must not be used")
+    ) as connect:
         response = client.get(
             "/api/v1/dashboard/config",
             params=params,
         )
 
     assert response.status_code == 200, response.text
+    connect.assert_not_called()
 
     data = response.json()["data"]
     assert len(data["stations"]) == 1

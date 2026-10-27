@@ -1,7 +1,9 @@
 ﻿"""ASOS CSV 데이터를 PostgreSQL에 적재하기 위한 도구."""
 
-from pathlib import Path
 import argparse
+from contextlib import nullcontext
+from pathlib import Path
+
 import pandas as pd
 
 DEFAULT_CSV = (
@@ -85,7 +87,7 @@ def prepare_records(df: pd.DataFrame) -> list[dict]:
     return records
 
 
-def insert_records(records: list[dict], apply: bool = False) -> int:
+def insert_records(records: list[dict], apply: bool = False, connection=None) -> int:
     """ASOS 관측자료 적재. 기본값은 DB에 쓰지 않는 dry-run."""
     if not apply:
         print(f"[DRY-RUN] 적재 후보 {len(records)}건 / DB 변경 없음")
@@ -121,18 +123,21 @@ def insert_records(records: list[dict], apply: bool = False) -> int:
     sql = f"""
     INSERT INTO public.raw_weather_asos_realtime ({column_sql})
     VALUES ({placeholders})
-    ON CONFLICT (tm, stn_id) DO NOTHING
+    ON CONFLICT (tm, stn_id) DO UPDATE SET
+    {', '.join(f'{col} = EXCLUDED.{col}' for col in columns if col not in ('tm', 'stn_id'))}
     """
 
     inserted = 0
 
-    with get_connection() as conn:
+    with (
+        nullcontext(connection) if connection is not None else get_connection()
+    ) as conn:
         with conn.cursor() as cur:
             for record in records:
                 cur.execute(sql, tuple(record[col] for col in columns))
                 inserted += cur.rowcount
 
-    print(f"[DB 적재 완료] 신규 {inserted}건")
+    print(f"[DB 적재 완료] 반영 {inserted}건")
     return inserted
 
 
