@@ -10,7 +10,6 @@ import HistoryPage from '../history/HistoryPage';
 import ForecastPanel from './components/ForecastPanel';
 import MissionConditionsForm from './components/MissionConditionsForm';
 import VisibilitySummary from './components/VisibilitySummary';
-import CollectionStatus from './components/CollectionStatus';
 import RequestErrorNotice from './components/RequestErrorNotice';
 import WeatherMap from './components/WeatherMap';
 import { buildFogCoverageBounds } from './fogDistribution';
@@ -292,7 +291,6 @@ export default function DashboardView({
             {error && (
               <RequestErrorNotice key={error} message={error} hasData={Boolean(dashboard)} busy={loading || Boolean(retryingSource)} onRetry={config.stations.length ? onRefresh : undefined} />
             )}
-            <CollectionStatus dashboard={dashboard} loading={loading} retryingSource={retryingSource} onRetrySource={onRetrySource} />
             <div className='dashboard-grid' aria-busy={loading}>
               <section className='panel map-panel' aria-labelledby='map-title'>
                 <div className='panel-header map-header'>
@@ -384,6 +382,7 @@ export default function DashboardView({
                 loading={loading}
                 onRefresh={onRefresh}
                 retryingSource={retryingSource}
+                onRetrySource={onRetrySource}
               />
               <MissionConditionsForm
                 config={missionConfig}

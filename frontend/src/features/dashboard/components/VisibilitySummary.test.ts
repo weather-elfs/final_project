@@ -5,8 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import type { DashboardData } from '../types';
 import { toDashboardData } from '../dashboardAdapter';
-import VisibilitySummary, { sourceStatusMessage } from './VisibilitySummary';
-import CollectionStatus from './CollectionStatus';
+import VisibilitySummary from './VisibilitySummary';
+import CollectionStatus, { sourceStatusMessage } from './CollectionStatus';
 
 function renderSummary(dashboard: DashboardData) {
   return renderToStaticMarkup(createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }));
@@ -109,7 +109,22 @@ test('부분 성공은 기존 관측과 출처별 재시도 버튼을 함께 유
   assert.match(markup, /aria-busy="true"/);
   assert.match(markup, /class="loading-spinner"/);
   assert.doesNotMatch(markup, /card-loading-overlay/);
-  assert.match(markup, /일부 자료 누락/);
+  assert.doesNotMatch(markup, /collection-status|일부 자료 누락 · 가능한 결과를 표시합니다/);
+});
+
+test('출처 설명은 접힌 행과 전체 상세를 제공하고 만료된 조회는 재시도를 막는다', () => {
+  const markup = renderToStaticMarkup(createElement(CollectionStatus, {
+    dashboard: {
+      sourceStatus: [{ source: 'AIRKOREA', status: 'partial', reason: 'BASELINE_MISSING', observedAt: '2026-10-27T12:00:00+09:00' }],
+      meta: { collection: { id: 'expired', expiresAt: '2020-01-01T00:00:00Z', errors: { AIRKOREA: 'BASELINE_MISSING' }, retryableSources: ['AIRKOREA'] } },
+    },
+    loading: false, onRetrySource: () => {},
+  }));
+  assert.equal((markup.match(/<details /g) ?? []).length, 1);
+  assert.match(markup, /<summary>/);
+  assert.match(markup, /<p>예측 기준이 되는 일부 관측값이 없습니다. · 관측 12:00:00<\/p>/);
+  assert.match(markup, /disabled=""[^>]*aria-label="에어코리아 관측만 재시도"/);
+  assert.match(markup, /자료 보관 시간이 지났습니다/);
 });
 
 test('현재 기상 조회는 즉시 카드 로딩을 표시하면서 기존 관측을 유지한다', () => {

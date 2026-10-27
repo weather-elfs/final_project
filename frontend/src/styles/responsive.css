@@ -214,9 +214,13 @@
     max-height: calc(100dvh - 5.25rem);
     overflow-y: auto;
   }
-  .data-status-row {
-    grid-template-columns: 0.5rem minmax(5.75rem, 1fr) 2.75rem minmax(8rem, 1.5fr);
+  .data-status-row > summary {
+    grid-template-columns: 0.5rem minmax(0, 1fr) 3.5rem 0.75rem;
+    padding: 0.5rem 0;
+    row-gap: 0.25rem;
   }
+  .data-status-preview { grid-column: 2 / 4; grid-row: 2; }
+  .data-status-chevron { grid-column: 4; grid-row: 1; }
   .fog-criteria-items {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

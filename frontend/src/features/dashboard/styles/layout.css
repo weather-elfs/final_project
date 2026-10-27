@@ -38,7 +38,7 @@
   animation: dashboard-loading-spin 0.8s linear infinite;
 }
 
-.weather-ui .collection-source button .loading-spinner {
+.weather-ui .data-status-detail button .loading-spinner {
   width: 0.875rem;
   height: 0.875rem;
   margin-right: 0.4rem;

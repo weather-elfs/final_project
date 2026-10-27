@@ -125,14 +125,41 @@
 }
 
 .data-status-row {
-  display: grid;
-  grid-template-columns: 0.5rem 7.5rem 3.125rem minmax(0, 1fr);
-  align-items: center;
-  column-gap: 0.5rem;
-  height: 2.25rem;
   border-bottom: 0.0625rem solid #e8e8e8;
   font-size: 0.875rem;
 }
+
+.data-status-row > summary {
+  display: grid;
+  grid-template-columns: 0.5rem 7.5rem 3.5rem minmax(0, 1fr) 0.75rem;
+  align-items: center;
+  column-gap: 0.5rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.data-status-row > summary::-webkit-details-marker { display: none; }
+.data-status-row > summary:hover { background: #f4f7fa; }
+.data-status-row > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.data-status-chevron {
+  width: 0.75rem;
+  height: 0.75rem;
+  background: var(--select-chevron) center / 0.75rem 0.75rem no-repeat;
+}
+.data-status-row[open] .data-status-chevron { transform: rotate(180deg); }
+.data-status-detail { padding: 0 0 0.75rem 1rem; color: #525252; line-height: 1.6; }
+.data-status-detail p { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+.weather-ui .data-status-detail button {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid #c6c6c6;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #173a61;
+  cursor: pointer;
+}
+.weather-ui .data-status-detail button:disabled { opacity: 0.6; cursor: default; }
+.data-status-expired { color: #525252; font-size: 0.875rem; line-height: 1.6; }
 
 .data-status-row i {
   width: 0.5rem;
@@ -148,7 +175,7 @@
   white-space: nowrap;
 }
 
-.data-status-row > span {
+.data-status-preview {
   overflow: hidden;
   color: #525252;
   text-overflow: ellipsis;
@@ -531,17 +558,3 @@
 .metric-grid strong {
   font-size: 16px;
 }
-.collection-status {
-  margin: 0.75rem 0;
-  padding: 0.75rem;
-  border: 1px solid #e5c788;
-  border-radius: 0.5rem;
-  background: #fff9ec;
-  color: #664b1e;
-  font-size: 0.8rem;
-}
-.collection-status p { margin: 0.4rem 0; line-height: 1.5; }
-.collection-source { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-top: 0.5rem; }
-.collection-source small { display: block; margin-top: 0.2rem; }
-.collection-source button { flex-shrink: 0; padding: 0.35rem 0.6rem; border: 1px solid #b89042; border-radius: 0.35rem; background: #fff; color: #664b1e; cursor: pointer; }
-.collection-source button:disabled { opacity: 0.6; cursor: default; }

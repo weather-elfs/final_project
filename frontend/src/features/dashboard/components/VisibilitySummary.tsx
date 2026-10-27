@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 
 import { AIR_QUALITY_CRITERIA, airQualityByAqi, airQualityByParticles, fogGradeByVisibility, fogStageLabel } from '../gradeTones';
 import { formatKstTime, metric } from '../formatters';
-import type { DashboardData, SourceStatusDetail } from '../types';
-import { DATA_SOURCE_LABELS, SOURCE_FAILURE_MESSAGES } from '../stationStatus';
+import type { DashboardData } from '../types';
+import CollectionStatus from './CollectionStatus';
 import CardLoadingOverlay from './CardLoadingOverlay';
 
 const FOG_CRITERIA = [
@@ -16,59 +16,6 @@ const FOG_CRITERIA = [
   { stage: '6/6단계', label: '짙은 안개', range: '200 m 미만', tone: 'maroon' },
 ] as const;
 
-const SOURCE_LABELS: Record<string, string> = {
-  ...DATA_SOURCE_LABELS,
-  ASOS: '기상청 ASOS',
-  AIRKOREA: '에어코리아',
-  TIDE_OBSERVATORY: '국립해양조사원',
-  MARINE: '해양부이',
-  PM1: '산림청 PM1',
-  FOREST: '산림청 PM1',
-  GK2A: '천리안',
-};
-
-const SOURCE_ORDER = ['ASOS', 'TIDE_OBSERVATORY', 'MARINE', 'PM1', 'FOREST', 'AIRKOREA', 'GK2A'];
-
-function sourceStatusPresentation(status?: string) {
-  const normalized = status?.toUpperCase();
-  if (normalized === 'PARTIAL') return { label: '일부 누락', tone: 'delayed' } as const;
-  if (normalized === 'OK' || normalized === 'FRESH' || normalized === 'GOOD') {
-    return { label: '정상', tone: 'good' } as const;
-  }
-  if (normalized === 'STALE' || normalized === 'DELAYED') {
-    return { label: '지연', tone: 'delayed' } as const;
-  }
-  return { label: '오류', tone: 'error' } as const;
-}
-
-function elapsedLabel(minutes?: number | null) {
-  if (minutes == null || !Number.isFinite(minutes)) return '수신 지연';
-  if (minutes >= 1_440) return `${Math.floor(minutes / 1_440)}일째 미수신`;
-  if (minutes >= 60) return `${Math.floor(minutes / 60)}시간째 미수신`;
-  return `${Math.max(1, Math.floor(minutes))}분째 미수신`;
-}
-
-export function sourceStatusMessage(source: SourceStatusDetail) {
-  const presentation = sourceStatusPresentation(source.status);
-  if (source.source.toUpperCase().endsWith('_FORECAST')) {
-    const times = [source.issuedAt ? `발표 ${formatKstTime(source.issuedAt)}` : '', source.collectedAt ? `수집 ${formatKstTime(source.collectedAt)}` : ''].filter(Boolean).join(' · ');
-    return `${presentation.tone === 'good' ? '예보 수신' : SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '예보 일부 누락'}${times ? ` · ${times}` : ''}`;
-  }
-  const observedTime = source.observedAt ? formatKstTime(source.observedAt) : '';
-  if (source.status.toUpperCase() === 'PARTIAL') return `${SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? '일부 관측값 누락'}${observedTime ? ` · 관측 ${observedTime}` : ''}`;
-  if (presentation.tone === 'good') return observedTime ? `${observedTime} 수신` : '정상 수신';
-  if (presentation.tone === 'delayed') {
-    return `${elapsedLabel(source.ageMinutes)}${observedTime ? ` · 정상 ${observedTime}` : ''}`;
-  }
-
-  const reason = SOURCE_FAILURE_MESSAGES[source.reason ?? ''] ?? (source.reason?.toUpperCase() === 'TIMEOUT'
-    ? '응답 시간 초과'
-    : source.reason?.toUpperCase() === 'MISSING'
-      ? '데이터 없음'
-      : source.reason || '수신 오류');
-  return `${reason}${observedTime ? ` · 정상 ${observedTime}` : ''}`;
-}
-
 function weatherGlyph(label?: string) {
   if (label?.includes('비')) return '☂';
   if (label?.includes('맑')) return '☀';
@@ -76,7 +23,7 @@ function weatherGlyph(label?: string) {
   return '≡';
 }
 
-export default function VisibilitySummary({ dashboard, loading, onRefresh, retryingSource }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void; retryingSource?: string | null }) {
+export default function VisibilitySummary({ dashboard, loading, onRefresh, retryingSource, onRetrySource }: { dashboard: DashboardData | null; loading: boolean; onRefresh: () => void; retryingSource?: string | null; onRetrySource?: (source: string) => void }) {
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const criteriaRootRef = useRef<HTMLDivElement>(null);
@@ -95,11 +42,6 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
     ? airQualityByAqi(serverAqi.status === 'calculated' ? serverAqi.value : null)
     : airQualityByParticles(current?.pm25UgM3, current?.pm10UgM3);
   const fogDetail = fogGrade.rangeLabel === '자료 없음' ? fogGrade.label : `${fogGrade.label} · ${fogGrade.rangeLabel}`;
-  const sourceStatuses = [...(dashboard?.sourceStatus ?? [])].sort((left, right) => {
-    const leftOrder = SOURCE_ORDER.indexOf(left.source.toUpperCase());
-    const rightOrder = SOURCE_ORDER.indexOf(right.source.toUpperCase());
-    return (leftOrder < 0 ? SOURCE_ORDER.length : leftOrder) - (rightOrder < 0 ? SOURCE_ORDER.length : rightOrder);
-  });
 
   useEffect(() => {
     if (!criteriaOpen) return undefined;
@@ -176,19 +118,7 @@ export default function VisibilitySummary({ dashboard, loading, onRefresh, retry
                   <h3 id="data-status-title">출처별 데이터 상태</h3>
                   <span>현재 상태</span>
                 </div>
-                <div className="data-status-list">
-                  {sourceStatuses.length > 0 ? sourceStatuses.map((source) => {
-                    const presentation = sourceStatusPresentation(source.status);
-                    return (
-                      <div className="data-status-row" key={source.source}>
-                        <i className={`status-${presentation.tone}`} aria-hidden="true" />
-                        <strong>{SOURCE_LABELS[source.source.toUpperCase()] ?? source.source}</strong>
-                        <b className={`status-${presentation.tone}`}>{presentation.label}</b>
-                        <span>{sourceStatusMessage(source)}</span>
-                      </div>
-                    );
-                  }) : <p className="data-status-empty">출처별 상태 정보가 없습니다.</p>}
-                </div>
+                <CollectionStatus dashboard={dashboard} loading={loading} retryingSource={retryingSource} onRetrySource={onRetrySource} />
                 <div className="data-status-footer">
                   <span>갱신 시각 {formatKstTime(lastRefreshAt)} KST</span>
                   <span>Esc로 닫기</span>
