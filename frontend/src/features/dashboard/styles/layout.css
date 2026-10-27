@@ -5,6 +5,26 @@
   padding-top: 0;
 }
 
+.weather-ui .marine-maintenance-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 1rem;
+  border: 1px solid #d9e0e8;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: #394b5d;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.weather-ui .marine-maintenance-notice a {
+  color: #205da8;
+  white-space: nowrap;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 25fr) minmax(0, 21fr);

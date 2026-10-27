@@ -288,6 +288,10 @@ export default function DashboardView({
           </div>
 
           <main className='dashboard-main'>
+            <aside className='marine-maintenance-notice' aria-label='해양 관측 API 점검 안내'>
+              <span>국립해양조사원 API 점검 안내 · 2026년 10월 30일~31일 해양 관측자료 수신이 중단될 수 있습니다. 일정은 변경될 수 있습니다.</span>
+              <a href='https://www.data.go.kr/bbs/ntc/selectNotice.do?originId=NOTICE_0000000005103' target='_blank' rel='noopener noreferrer'>공지 확인</a>
+            </aside>
             {error && (
               <RequestErrorNotice key={error} message={error} hasData={Boolean(dashboard)} busy={loading || Boolean(retryingSource)} onRetry={config.stations.length ? onRefresh : undefined} />
             )}
