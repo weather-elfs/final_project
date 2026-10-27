@@ -215,7 +215,7 @@
     overflow-y: auto;
   }
   .data-status-row > summary {
-    grid-template-columns: 0.5rem minmax(0, 1fr) 3.5rem 0.75rem;
+    grid-template-columns: 0.5rem minmax(0, 1fr) max-content 0.75rem;
     padding: 0.5rem 0;
     row-gap: 0.25rem;
   }

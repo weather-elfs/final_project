@@ -88,7 +88,7 @@
 
 .data-status-popover {
   position: absolute;
-  z-index: 40;
+  z-index: 1001;
   top: 5.75rem;
   right: 1.375rem;
   width: min(31.25rem, calc(100vw - 2rem));
@@ -131,7 +131,7 @@
 
 .data-status-row > summary {
   display: grid;
-  grid-template-columns: 0.5rem 7.5rem 3.5rem minmax(0, 1fr) 0.75rem;
+  grid-template-columns: 0.5rem 7.5rem 6rem minmax(0, 1fr) 0.75rem;
   align-items: center;
   column-gap: 0.5rem;
   min-height: 2.5rem;
