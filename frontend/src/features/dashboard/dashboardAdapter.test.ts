@@ -131,6 +131,36 @@ test('최신 백엔드 예측 응답과 fresh/delayed/missing 상태를 UI 모�
   assert.equal(dashboard.meta?.mock, false);
 });
 
+test('같은 예측 간격과 대상 시각의 기상청 예보를 연결하고 모델 결과는 유지한다', () => {
+  const dashboard = toDashboardData({
+    forecast_timeline: [{ horizon_h: 3, valid_at: '2026-10-27T12:00:00+09:00', visibility_pred_km: 4.6 }],
+    meta: { forecasts: [{ horizon_h: 3, valid_at: '2026-10-27T03:00:00Z', values: { future_fcst_temp: 17, future_fcst_wind_dir: 315, future_fcst_wind_speed: 4, future_fcst_sky: 4, future_fcst_pty: 0 } }] },
+  });
+  const point = dashboard.forecastTimeline?.[0];
+  assert.equal(point?.temperatureC, 17);
+  assert.equal(point?.windDirectionLabel, '북서풍');
+  assert.equal(point?.windSpeedMS, 4);
+  assert.equal(point?.weatherLabel, '흐림');
+  assert.equal(point?.visibilityPredKm, 4.6);
+});
+
+test('다른 시각 예보·결측 강수 코드는 날씨를 채우지 않고 명시된 timeline 값은 보존한다', () => {
+  const forecast = { horizon_h: 3, valid_at: '2026-10-27T12:00:00+09:00', values: { future_fcst_temp: 17, future_fcst_wind_dir: null, future_fcst_sky: 1, future_fcst_pty: null as number | null } };
+  const convert = (validAt: string, temperature?: number | null) => toDashboardData({
+    forecast_timeline: [{ horizon_h: 3, valid_at: validAt, ...(temperature === undefined ? {} : { temperature_c: temperature }) }],
+    meta: { forecasts: [forecast] },
+  }).forecastTimeline?.[0];
+  assert.equal(convert('2026-10-27T15:00:00+09:00')?.temperatureC, undefined);
+  assert.equal(convert(forecast.valid_at)?.weatherLabel, undefined);
+  assert.equal(convert(forecast.valid_at)?.windDirectionLabel, undefined);
+  assert.equal(convert(forecast.valid_at, null)?.temperatureC, null);
+  assert.equal(convert(forecast.valid_at, 20)?.temperatureC, 20);
+  for (const [code, label] of [[1, '비'], [2, '비 또는 눈'], [3, '눈'], [4, '소나기']] as const) {
+    forecast.values.future_fcst_pty = code;
+    assert.equal(convert(forecast.valid_at)?.weatherLabel, label);
+  }
+});
+
 test('설정 응답의 좌표로 현재 지도 범위 안 관측소만 반환한다', () => {
   const config = toDashboardConfig({
     stations: [

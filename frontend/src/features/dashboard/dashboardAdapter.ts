@@ -1,6 +1,12 @@
 import type { MapViewport } from '../../api';
+import { isFiniteNumber } from './formatters';
 import { normalizeCurrentStatus, normalizeForecastStatus } from './stationStatus';
 import type { DashboardConfig, DashboardData, DashboardStation, SourceStatusDetail } from './types';
+
+const WIND_DIRECTIONS = ['북풍', '북북동풍', '북동풍', '동북동풍', '동풍', '동남동풍', '남동풍', '남남동풍', '남풍', '남남서풍', '남서풍', '서남서풍', '서풍', '서북서풍', '북서풍', '북북서풍'];
+// 기상청 단기예보 SKY·PTY 코드: https://www.weather.go.kr/w/resources/pdf/dongnaeforecast_1hr_rss.pdf
+const SKY_LABELS: Record<number, string> = { 1: '맑음', 3: '구름많음', 4: '흐림' };
+const PRECIPITATION_LABELS: Record<number, string> = { 1: '비', 2: '비 또는 눈', 3: '눈', 4: '소나기' };
 
 function camelizeKey(key: string) {
   return key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -56,6 +62,24 @@ export function toDashboardData(payload: unknown): DashboardData {
 
   return {
     ...data,
+    forecastTimeline: data.forecastTimeline?.map((point) => {
+      const input = data.meta?.forecasts?.find((item) => item.horizonH === point.horizonH
+        && item.validAt && point.validAt && Date.parse(item.validAt) === Date.parse(point.validAt));
+      const values = input?.values;
+      const direction = values?.futureFcstWindDir;
+      const sky = values?.futureFcstSky;
+      const precipitation = values?.futureFcstPty;
+      return {
+        temperatureC: values?.futureFcstTemp,
+        windSpeedMS: values?.futureFcstWindSpeed,
+        windDirectionDeg: direction,
+        windDirectionLabel: isFiniteNumber(direction) && direction >= 0 && direction <= 360
+          ? WIND_DIRECTIONS[Math.floor((direction % 360 + 11.25) / 22.5) % 16] : undefined,
+        weatherLabel: precipitation === 0 && isFiniteNumber(sky) ? SKY_LABELS[sky]
+          : isFiniteNumber(precipitation) ? PRECIPITATION_LABELS[precipitation] : undefined,
+        ...point,
+      };
+    }),
     sourceStatus,
     apiStatus: data.apiStatus ?? {
       overall: {

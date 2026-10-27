@@ -72,6 +72,10 @@ export interface CurrentConditions {
   pm1UgM3?: number | null;
   pm25UgM3?: number | null;
   pm10UgM3?: number | null;
+  pm25ObservedAt?: string | null;
+  pm10ObservedAt?: string | null;
+  pm25Reused?: boolean;
+  pm10Reused?: boolean;
   temperatureC?: number | null;
   windDirectionDeg?: number | null;
   windDirectionLabel?: string;
@@ -96,6 +100,7 @@ export interface ForecastPoint {
   pm25PredUgM3?: number | null;
   pm10PredUgM3?: number | null;
   temperatureC?: number | null;
+  windDirectionDeg?: number | null;
   windDirectionLabel?: string;
   windSpeedMS?: number | null;
   weatherLabel?: string;
@@ -176,6 +181,17 @@ export interface DashboardData {
   meta?: {
     requestId?: string; generatedAt?: string; partial?: boolean; mock?: boolean;
     model?: { missingFeatures?: string[]; originAt?: string };
+    forecasts?: Array<{
+      horizonH?: number;
+      validAt?: string;
+      values?: {
+        futureFcstTemp?: number | null;
+        futureFcstWindDir?: number | null;
+        futureFcstWindSpeed?: number | null;
+        futureFcstSky?: number | null;
+        futureFcstPty?: number | null;
+      };
+    }>;
     collection?: {
       id: string;
       expiresAt?: string;
