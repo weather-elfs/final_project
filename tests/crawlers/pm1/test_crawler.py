@@ -2,6 +2,7 @@ import io
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 
@@ -357,6 +358,16 @@ def test_environment_loader_rejects_duplicate_relevant_key(tmp_path: Path) -> No
         load_environment(env_path, {})
 
 
+def test_shared_data_key_is_loaded_from_dotenv_and_process(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("DATA_API_KEY=file-key\n", encoding="utf-8")
+    assert load_environment(env_path, {})["DATA_API_KEY"] == "file-key"
+    assert (
+        load_environment(env_path, {"DATA_API_KEY": "process-key"})["DATA_API_KEY"]
+        == "process-key"
+    )
+
+
 def collection_env() -> dict[str, str]:
     return {
         "PM1_API_KEY": "api-secret-sentinel",
@@ -369,6 +380,50 @@ def collection_env() -> dict[str, str]:
         "DB_INGEST_USER": "pm1_ingest",
         "DB_INGEST_PASSWORD": "db-secret-sentinel",
     }
+
+
+@pytest.mark.parametrize(
+    ("keys", "expected"),
+    [
+        ({"DATA_API_KEY": "shared"}, "shared"),
+        ({"PM1_API_KEY": "legacy"}, "legacy"),
+        ({"DATA_API_KEY": "shared", "PM1_API_KEY": "legacy"}, "shared"),
+    ],
+)
+def test_collection_uses_shared_key_with_legacy_fallback(monkeypatch, keys, expected):
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(pm1_main, "connect_database", lambda config: Connection())
+    monkeypatch.setattr(pm1_main, "acquire_source_lock", lambda connection: True)
+    monkeypatch.setattr(pm1_main, "validate_schema", lambda connection: None)
+    monkeypatch.setattr(
+        pm1_main,
+        "read_ingest_state",
+        lambda connection: SimpleNamespace(
+            schema_version=1,
+            source_timezone="+09:00",
+            sync_lag_hours=1,
+            next_start_dtm="202309180000",
+        ),
+    )
+    captured = []
+
+    def capture_key(window, key, source_timezone):
+        captured.append(key)
+        raise RuntimeError("stop after key selection")
+
+    monkeypatch.setattr(pm1_main, "fetch_hour", capture_key)
+    env = {**collection_env(), **keys}
+    if "PM1_API_KEY" not in keys:
+        env.pop("PM1_API_KEY")
+    with pytest.raises(RuntimeError, match="stop after key selection"):
+        pm1_main.run_collection("backfill", "202309180000", env)
+    assert captured == [expected]
 
 
 def test_future_backfill_end_is_rejected_before_database_or_api(monkeypatch) -> None:
