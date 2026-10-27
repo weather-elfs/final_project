@@ -1,0 +1,25 @@
+{
+  // 패키지 자동 import 제안 활성화
+  "python.analysis.autoImportCompletions": true,
+
+  // 저장 시 자동 포맷
+  "editor.formatOnSave": true,
+
+  // 범용(Markdown·JSON·YAML 등) 기본 포매터: Prettier
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  // Python: Black 포매터 + 저장 시 isort로 import 정렬
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "always"
+    }
+  },
+
+  // Jupyter 노트북에도 동일 적용
+  "notebook.formatOnSave.enabled": true,
+  "notebook.defaultFormatter": "ms-python.black-formatter",
+  "notebook.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+  }
+}

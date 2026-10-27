@@ -1,0 +1,300 @@
+@media (max-width: 73.75rem) {
+  .page-meta {
+    width: min(750px, calc(100% - 32px));
+  }
+  .dashboard-main {
+    width: min(750px, calc(100% - 32px));
+    padding-top: 0;
+  }
+  .weather-ui .workspace-page-main {
+    width: min(46.875rem, calc(100% - 2rem));
+  }
+  .weather-ui .alert-layout,
+  .weather-ui .history-layout {
+    grid-template-columns: 1fr;
+  }
+  .weather-ui .history-filter-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .weather-ui .filter-spacer {
+    display: none;
+  }
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: 'map' 'current' 'mission' 'forecast';
+  }
+  .panel {
+    width: 100%;
+  }
+}
+
+@media (max-width: 43.75rem) {
+  .top-bar {
+    height: 56px;
+    align-items: center;
+    padding: 0 14px;
+  }
+  .brand {
+    gap: 8px;
+  }
+  .brand > span {
+    width: 28px;
+    height: 28px;
+    font-size: 17px;
+  }
+  .brand strong {
+    font-size: 17px;
+  }
+  .primary-navigation {
+    position: fixed;
+    z-index: 80;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    height: 3.5rem;
+    padding: 0 0.5rem;
+    background: #fff;
+    box-shadow: 0 -0.125rem 0.5rem #00000014;
+  }
+  .primary-navigation button {
+    width: auto;
+    font-size: 0.875rem;
+  }
+  .account-trigger {
+    width: auto;
+    padding-right: 0;
+    font-size: 12px;
+  }
+  .page-meta {
+    width: calc(100% - 28px);
+    height: 42px;
+    padding-top: 7px;
+  }
+  .reference-time {
+    font-size: 12px;
+  }
+  .dashboard-main {
+    width: calc(100% - 24px);
+    padding-top: 0;
+  }
+  .weather-ui .workspace-page-main {
+    width: calc(100% - 1.5rem);
+  }
+  .weather-ui .section-page-header {
+    min-height: 7.5rem;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 0.75rem;
+  }
+  .weather-ui .section-page-header h1 {
+    font-size: 1.5rem;
+  }
+  .weather-ui .section-page-header p {
+    font-size: 0.875rem;
+  }
+  .weather-ui .section-page-header > strong {
+    align-self: flex-end;
+    margin-top: 0;
+    font-size: 0.75rem;
+  }
+  .weather-ui .principle-grid,
+  .weather-ui .history-filter-card {
+    grid-template-columns: 1fr;
+  }
+  .weather-ui .history-filter-card > button {
+    width: 100%;
+  }
+  .weather-ui .workspace-card {
+    padding: 1rem;
+  }
+  .weather-ui .alert-rules-card,
+  .weather-ui .decision-log-card,
+  .weather-ui .history-table-card,
+  .weather-ui .history-detail-card {
+    min-height: auto;
+  }
+  .weather-ui .rule-actions {
+    flex-direction: column;
+  }
+  .weather-ui .rule-actions button {
+    width: 100%;
+  }
+  .app-footer {
+    padding-bottom: 4rem;
+  }
+  .map-panel,
+  .current-weather-panel,
+  .mission-panel,
+  .forecast-panel {
+    height: auto;
+    min-height: 23.375rem;
+  }
+  .map-header {
+    height: auto;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .map-header > div:first-child {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .layer-toggle {
+    width: 100%;
+  }
+  .map-canvas,
+  .map-placeholder {
+    height: 310px;
+  }
+  .map-frame.with-fog-scale .map-canvas {
+    height: 242px;
+  }
+  .forecast-playback {
+    right: 9px;
+    bottom: 52px;
+    left: 9px;
+  }
+  .forecast-playback-steps button {
+    gap: 2px;
+  }
+  .forecast-playback-steps button span {
+    display: none;
+  }
+  .fog-stage-scale {
+    height: 68px;
+  }
+  .map-source {
+    gap: 8px;
+    flex-direction: column;
+    padding-bottom: 12px;
+  }
+  .current-weather-header,
+  .weather-metrics,
+  .impact-title,
+  .impact-grid,
+  .diagnosis-summary,
+  .related-title,
+  .metric-grid {
+    position: static;
+  }
+  .weather-metrics {
+    grid-template-columns: 1fr 1fr;
+    height: auto;
+    margin: 0 16px;
+    gap: 18px;
+  }
+  .impact-title {
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    height: 55px;
+    align-items: flex-end;
+    padding: 0 16px 10px;
+  }
+  .stage-criteria-popover {
+    position: fixed;
+    top: 4.5rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    height: auto;
+    max-height: calc(100dvh - 5.25rem);
+    overflow-y: auto;
+  }
+  .data-status-popover {
+    position: fixed;
+    top: 4.5rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 5.25rem);
+    overflow-y: auto;
+  }
+  .data-status-row > summary {
+    grid-template-columns: 0.5rem minmax(0, 1fr) max-content 0.75rem;
+    padding: 0.5rem 0;
+    row-gap: 0.25rem;
+  }
+  .data-status-preview { grid-column: 2 / 4; grid-row: 2; }
+  .data-status-chevron { grid-column: 4; grid-row: 1; }
+  .fog-criteria-items {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .fog-criteria-items .stage-criteria-item:first-child {
+    grid-column: 1 / -1;
+  }
+  .air-quality-criteria-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .impact-grid {
+    margin: 0 16px;
+  }
+  .diagnosis-summary {
+    margin: 17px 16px 0;
+  }
+  .related-title {
+    height: auto;
+    margin: 13px 16px 8px;
+  }
+  .metric-grid {
+    margin: 0 16px;
+  }
+  .impact-grid,
+  .metric-grid,
+  .form-row {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .forecast-results {
+    min-height: 20rem;
+  }
+  .forecast-summary {
+    white-space: normal;
+  }
+  .impact-grid article + article {
+    padding: 10px 0 0;
+    border-top: 1px solid #e0e0e0;
+    border-left: 0;
+  }
+  .current-weather-panel {
+    padding-bottom: 16px;
+  }
+  .mission-form {
+    padding-bottom: 1.25rem;
+  }
+  .mission-actions {
+    position: static;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .mission-actions button {
+    width: 100%;
+  }
+  .login-page {
+    padding: 0;
+  }
+  .login-card {
+    width: 100%;
+    min-height: 100vh;
+    padding: 44px 24px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weather-ui,
+  .weather-ui *,
+  .weather-ui *::before,
+  .weather-ui *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -1,0 +1,16 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+
+import DashboardView from '../DashboardView';
+import { config, dashboard, noop, values } from './storyData';
+
+const meta = { title: 'Dashboard/DashboardView', component: DashboardView, parameters: { layout: 'fullscreen' } } satisfies Meta<typeof DashboardView>;
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+const defaultArgs = { config, missionStations: config.stations, dashboard, mapMode: 'current' as const, mapTilesEnabled: false, values, onChange: noop, onMapModeChange: noop, onMapViewportChange: noop, onStationSelect: noop, onRefresh: noop, onSubmit: noop };
+export const Default: Story = { args: defaultArgs };
+export const ForecastReady: Story = { args: { ...defaultArgs, values: { stationId: '112', forecastIntervalH: 6, missionType: 'MARITIME_TRANSPORT' }, forecastRequested: true } };
+export const PartialData: Story = { args: { ...defaultArgs, dashboard: { ...dashboard, meta: { ...dashboard.meta, partial: true }, current: { ...dashboard.current, pm25UgM3: null } } } };
+export const Loading: Story = { args: { ...defaultArgs, loading: true } };
+export const Error: Story = { args: { ...defaultArgs, dashboard: null, error: '관측 데이터를 불러오지 못했습니다. (요청 ID: story-error)' } };
+export const RefreshError: Story = { args: { ...defaultArgs, error: '최신 자료 갱신 요청에 실패했습니다. (요청 ID: story-refresh-error)' } };

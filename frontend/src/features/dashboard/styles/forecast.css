@@ -1,0 +1,201 @@
+.forecast-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  grid-area: forecast;
+  min-height: 23.375rem;
+}
+
+.forecast-panel .panel-header {
+  flex: 0 0 3.375rem;
+  height: 3.375rem;
+}
+
+.forecast-header {
+  align-items: center;
+}
+
+.forecast-header p {
+  margin: 0;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.forecast-empty {
+  height: 19.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 7.375rem;
+}
+
+.forecast-empty strong {
+  font-size: 1.375rem;
+  font-weight: 600;
+}
+
+.forecast-empty span {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.forecast-results {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0 1rem 1rem;
+}
+
+.forecast-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+}
+
+.forecast-table {
+  width: 100%;
+  min-width: 28rem;
+  height: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.875rem;
+  line-height: 1.05;
+}
+
+.forecast-table caption {
+  position: absolute;
+  width: 0.0625rem;
+  height: 0.0625rem;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.forecast-table th,
+.forecast-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 0.0625rem solid #e5e7eb;
+  overflow-wrap: anywhere;
+  text-align: center;
+  vertical-align: middle;
+  word-break: keep-all;
+}
+
+.forecast-table th:first-child {
+  width: 13%;
+  padding-right: 0.25rem;
+  padding-left: 0.25rem;
+  color: var(--muted);
+}
+
+.forecast-table thead th {
+  color: var(--text);
+  background: var(--background);
+  font-weight: 600;
+}
+
+.forecast-table tbody th {
+  font-weight: 600;
+}
+
+.forecast-table tbody td {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.forecast-table tbody tr:last-child th,
+.forecast-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.forecast-cell-lines span {
+  display: block;
+}
+
+.weather-ui .forecast-weather-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.weather-ui .forecast-weather-icon {
+  flex: 0 0 1rem;
+  width: 1rem;
+  height: 1rem;
+  color: #858b93;
+}
+
+.weather-ui .forecast-grade {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.125rem 0;
+}
+
+.weather-ui .forecast-stage-badge {
+  min-width: 4rem;
+  max-width: 100%;
+  height: auto;
+  padding: 0.25rem 0.4375rem;
+  border-radius: 0.25rem;
+  background: #f1f3f6;
+  color: #525b65;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.weather-ui .forecast-stage-badge.grade-tone-sky { background: #eaf5fc; color: #356783; }
+.weather-ui .forecast-stage-badge.grade-tone-yellow { background: #fff7df; color: #865b12; }
+.weather-ui .forecast-stage-badge.grade-tone-orange { background: #fff0e5; color: #954718; }
+.weather-ui .forecast-stage-badge.grade-tone-red { background: #fdebf0; color: #922c45; }
+.weather-ui .forecast-stage-badge.grade-tone-purple { background: #f2edf9; color: #67468e; }
+.weather-ui .forecast-stage-badge.grade-tone-maroon { background: #f7e8ed; color: #7d2941; }
+
+.weather-ui .forecast-grade-description {
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.forecast-visibility-row th,
+.forecast-table .forecast-visibility-row td {
+  background: #eff6ff;
+}
+
+.forecast-table .forecast-visibility-row td {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.forecast-summary {
+  flex: 0 0 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 0.5rem;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: var(--background);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.forecast-input-details {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.forecast-input-details summary { cursor: pointer; }
+.forecast-input-details p { margin: 0.35rem 0 0; }

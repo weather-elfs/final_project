@@ -1,0 +1,12 @@
+# 프로젝트 도구 설정.
+# Black과 isort는 확정했다. 환경·패키지 관리 도구와 린터는 아직 미확정이다.
+# 패키지 관리 방식과 Python 버전을 확정하면 [project]와 의존성 설정을 추가한다.
+
+[tool.isort]
+# Black과 충돌하지 않도록 black 프로필 사용 (라인 길이 88 등 자동 정렬)
+profile = "black"
+known_first_party = ["weather"]
+
+[tool.black]
+# 라인 길이는 기본값 88자를 그대로 사용한다(변경하지 않음).
+# line-length = 88   # 기본값이므로 명시 불필요
