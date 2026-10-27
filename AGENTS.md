@@ -36,7 +36,7 @@
 > | 항목 | 상태 | 확정 시점 |
 > | --- | --- | --- |
 > | 기상/가시도 데이터 출처 | **TBD** — 확정 후 `docs/research/`와 `docs/conventions/data.md` 갱신 | 전체 기능 개발 착수 전 필수 |
-> | 대시보드 프레임워크 (Streamlit 등) | **TBD** — 확정 후 `docs/conventions/dashboard.md` 작성 | 착수 후 확정 가능 |
+> | 대시보드 프레임워크 | **React + TypeScript + Vite + Storybook** — `frontend/`, `docs/conventions/dashboard.md` 기준 | 확정 (2026-09-30) |
 > | 6인 역할 분담 | **TBD** — 확정 후 `docs/agents/division-of-labor.md` 작성 | 전체 기능 개발 착수 전 필수 |
 > | 환경·패키지 관리 도구 (conda / uv 등) | **TBD** | 전체 기능 개발 착수 전 필수 |
 > | Python 린터 | **TBD** — 새 의존성 승인 후 자동 검사로 추가 | 착수 후 확정 가능 |
@@ -96,7 +96,7 @@
 | 무엇을 해도 되는지 / 승인이 필요한지 | `docs/agents/boundaries.md` |
 | 에이전트 도구 추가·어댑터·지침 로딩 변경 | `docs/agents/tool-compatibility.md` |
 | 데이터 수집·전처리·저장 | `docs/conventions/data.md` |
-| 대시보드 화면·컴포넌트 | `docs/conventions/dashboard.md` *(작성 예정)* |
+| 대시보드 화면·컴포넌트 | `docs/conventions/dashboard.md` |
 
 ## docs 구조
 
@@ -109,7 +109,7 @@ docs/
 │   ├── git.md                ← Git Flow, 커밋 규칙, PR
 │   ├── testing.md            ← pytest 원칙, 위치
 │   ├── data.md               ← 데이터 계층·보안·재현성
-│   └── dashboard.md          ← (작성 예정) 대시보드 규칙
+│   └── dashboard.md          ← React/Vite/Storybook 대시보드 규칙
 ├── agents/
 │   ├── workflow.md           ← 표준 작업 절차
 │   ├── boundaries.md         ← Always / Ask first / Never

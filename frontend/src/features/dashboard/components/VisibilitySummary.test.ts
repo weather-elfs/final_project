@@ -1,0 +1,154 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+import type { DashboardData } from '../types';
+import { toDashboardData } from '../dashboardAdapter';
+import VisibilitySummary from './VisibilitySummary';
+import CollectionStatus, { sourceStatusMessage } from './CollectionStatus';
+
+function renderSummary(dashboard: DashboardData) {
+  return renderToStaticMarkup(createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }));
+}
+
+test('갱신 시각은 API 응답 생성 시각을 쓰고 관측 시각으로 대체하지 않는다', () => {
+  const current = { observedAt: '2026-10-26T01:00:00+09:00' };
+  const missingRefresh = renderSummary({ current });
+  assert.match(missingRefresh, /갱신 시각 --:--:-- KST/);
+  assert.doesNotMatch(missingRefresh, /갱신 시각 01:00:00 KST/);
+
+  const withRefresh = renderSummary({ current, meta: { generatedAt: '2026-10-26T01:30:45+09:00' } });
+  assert.match(withRefresh, /갱신 시각 01:30:45 KST/);
+  assert.doesNotMatch(withRefresh, /갱신 시각 01:00:00 KST/);
+});
+
+test('최신 조회 실패로 자료가 없어지면 데이터 상태를 정상으로 표시하지 않는다', () => {
+  const markup = renderToStaticMarkup(createElement(VisibilitySummary, { dashboard: null, loading: false, onRefresh: () => {} }));
+  assert.match(markup, /데이터 상태 · 자료 없음/);
+  assert.doesNotMatch(markup, /데이터 상태 · 정상/);
+});
+
+test('시정 영향 요인은 원시 관측값으로 계산하고 종합 판정은 서버 값을 유지한다', () => {
+  const markup = renderSummary({
+    current: {
+      visibilityKm: 50,
+      pm25UgM3: 3,
+      pm10UgM3: 19,
+      aqi: { value: 999, displayLevel: 5, displayGrade: '위험' },
+    },
+    diagnosis: { pmDisplayGrade: '위험', summary: '서버 임무 판정' },
+  });
+  assert.match(markup, /추정 AQI 18 · 양호/);
+  assert.match(markup, /grade-tone-green">1\/5단계/);
+  assert.match(markup, /grade-tone-sky">안개 없음/);
+  assert.match(markup, /종합 추정: 서버 임무 판정/);
+  assert.doesNotMatch(markup, /AQI 999/);
+});
+
+test('시정·미세먼지가 악화되면 각 단계와 배지 색상도 함께 바뀐다', () => {
+  const markup = renderSummary({ current: { visibilityKm: 1.5, pm25UgM3: 55.5, pm10UgM3: 50 } });
+  assert.match(markup, /grade-tone-orange">3\/6단계/);
+  assert.match(markup, /추정 AQI 151 · 나쁨/);
+  assert.match(markup, /grade-tone-red">3\/5단계/);
+});
+
+test('누락된 관측값을 서버 AQI나 정상 단계로 대신 채우지 않는다', () => {
+  const markup = renderSummary({ current: { visibilityKm: null, pm25UgM3: null, pm10UgM3: 19, aqi: { value: 18, displayLevel: 1, displayGrade: '양호' } } });
+  assert.match(markup, /추정 AQI — · 판단 대기/);
+  assert.match(markup, /grade-tone-neutral">—\/5단계/);
+  assert.match(markup, /grade-tone-neutral">—\/6단계/);
+});
+
+test('NowCast 수치는 유지하고 서버 등급 대신 기획안 5단계를 적용한다', () => {
+  const markup = renderSummary(toDashboardData({
+    current: {
+      pm25_ug_m3: 3,
+      pm10_ug_m3: 19,
+      aqi: { basis: 'NOWCAST_CURRENT', standard: 'US_EPA', status: 'calculated', value: 62, display_level: 5, display_grade: '위험' },
+    },
+  }));
+  assert.match(markup, /AQI \(NowCast\) 62 · 양호/);
+  assert.match(markup, /grade-tone-green">1\/5단계/);
+  assert.doesNotMatch(markup, /추정 AQI 18/);
+});
+
+test('NowCast가 자료 부족이면 현재 PM 값이 있어도 판단 대기로 표시한다', () => {
+  const markup = renderSummary({ current: {
+    pm25UgM3: 3, pm10UgM3: 19,
+    aqi: { basis: 'NOWCAST_CURRENT', status: 'insufficient_data', value: null, displayLevel: null, displayGrade: null },
+  } });
+  assert.match(markup, /AQI \(NowCast\) — · 판단 대기/);
+  assert.match(markup, /grade-tone-neutral">—\/5단계/);
+});
+
+test('NowCast 0은 유효하고 누락·음수·비정상 수치는 판단 대기로 표시한다', () => {
+  const current = { aqi: { basis: 'NOWCAST_CURRENT', status: 'calculated', value: 0, displayLevel: 1, displayGrade: '양호' } };
+  assert.match(renderSummary({ current }), /AQI \(NowCast\) 0 · 양호/);
+  for (const value of [undefined, null, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.match(renderSummary({ current: { aqi: { ...current.aqi, value } } }), /AQI \(NowCast\) — · 판단 대기/);
+  }
+  assert.match(renderSummary({ current: { aqi: { ...current.aqi, displayLevel: 6 } } }), /AQI \(NowCast\) 0 · 양호/);
+});
+
+test('500 초과 NowCast는 실제 수치와 기획안 위험 5단계를 표시한다', () => {
+  const markup = renderSummary({ current: { aqi: { basis: 'NOWCAST_CURRENT', status: 'calculated', value: 649 } } });
+  assert.match(markup, /AQI \(NowCast\) 649 · 위험/);
+  assert.match(markup, /grade-tone-maroon">5\/5단계/);
+});
+test('부분 성공은 기존 관측과 출처별 재시도 버튼을 함께 유지한다', () => {
+  const dashboard: DashboardData = { current: { visibilityKm: 20, pm25UgM3: 10 }, forecastTimeline: [{ horizonH: 3, status: 'degraded', visibilityPredKm: 18 }], meta: { collection: { id: 'sample', errors: { TIDE_OBSERVATORY: 'COLLECTION_FAILED' }, retryableSources: ['TIDE_OBSERVATORY'] } } };
+  const markup = renderToStaticMarkup(createElement('div', null,
+    createElement(CollectionStatus, { dashboard, loading: false, retryingSource: 'TIDE_OBSERVATORY', onRetrySource: () => {} }),
+    createElement(VisibilitySummary, { dashboard, loading: false, onRefresh: () => {} }),
+  ));
+  assert.match(markup, /20.0 km/);
+  assert.match(markup, /10 µg\/m³/);
+  assert.match(markup, /국립해양조사원만 재시도/);
+  assert.match(markup, /재시도 중…/);
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /class="loading-spinner"/);
+  assert.doesNotMatch(markup, /card-loading-overlay/);
+  assert.doesNotMatch(markup, /collection-status|일부 자료 누락 · 가능한 결과를 표시합니다/);
+});
+
+test('출처 설명은 접힌 행과 전체 상세를 제공하고 만료된 조회는 재시도를 막는다', () => {
+  const markup = renderToStaticMarkup(createElement(CollectionStatus, {
+    dashboard: {
+      sourceStatus: [{ source: 'AIRKOREA', status: 'partial', reason: 'BASELINE_MISSING', observedAt: '2026-10-27T12:00:00+09:00' }],
+      meta: { collection: { id: 'expired', expiresAt: '2020-01-01T00:00:00Z', errors: { AIRKOREA: 'BASELINE_MISSING' }, retryableSources: ['AIRKOREA'] } },
+    },
+    loading: false, onRetrySource: () => {},
+  }));
+  assert.equal((markup.match(/<details /g) ?? []).length, 1);
+  assert.match(markup, /<summary>/);
+  assert.match(markup, /<p>예측 기준이 되는 일부 관측값이 없습니다. · 관측 12:00:00<\/p>/);
+  assert.match(markup, /disabled=""[^>]*aria-label="에어코리아 관측만 재시도"/);
+  assert.match(markup, /자료 보관 시간이 지났습니다/);
+});
+
+test('현재 기상 조회는 즉시 카드 로딩을 표시하면서 기존 관측을 유지한다', () => {
+  const markup = renderToStaticMarkup(createElement(VisibilitySummary, {
+    dashboard: { current: { visibilityKm: 20 } }, loading: true, onRefresh: () => {},
+  }));
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /class="card-loading-overlay" role="status"/);
+  assert.match(markup, /현재 기상 조회 중/);
+  assert.match(markup, /20.0 km/);
+  assert.doesNotMatch(renderSummary({ current: { visibilityKm: 20 } }), /card-loading-overlay/);
+});
+test('예보 발표·수집 시각은 관측 시각과 구분하고 일부 누락 사유를 표시한다', () => {
+  const message = sourceStatusMessage({ source: 'AIRKOREA_FORECAST', status: 'partial', issuedAt: '2026-10-26T05:00:00+09:00', collectedAt: '2026-10-26T10:00:00+09:00', reason: 'TARGET_TIME_MISSING_OR_STALE' });
+  assert.match(message, /발표 05:00:00 · 수집 10:00:00/);
+  assert.match(message, /해당 시점의 예보가 없거나 오래됐습니다/);
+  assert.doesNotMatch(message, /미수신/);
+});
+
+test('재사용 PM은 각 값의 실제 관측 시각과 이전 값 안내를 표시한다', () => {
+  const markup = renderSummary({ current: { pm25UgM3: 10, pm10UgM3: 31, pm25Reused: true, pm10Reused: true, pm25ObservedAt: '2026-10-27T10:00:00+09:00', pm10ObservedAt: '2026-10-27T10:00:00+09:00' } });
+  assert.match(markup, /10 µg\/m³/);
+  assert.equal((markup.match(/10:00:00 관측 · 이전 값/g) ?? []).length, 2);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'delayed', reason: 'PREVIOUS_OBSERVATION_USED', observedAt: '2026-10-27T10:00:00+09:00' }), /이전 정상 관측값을 사용합니다. · 관측 10:00:00/);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'partial', reason: 'UPSTREAM_COMMUNICATION_FAILURE' }), /에어코리아 관측소에서 미세먼지 통신장애/);
+  assert.match(sourceStatusMessage({ source: 'AIRKOREA', status: 'delayed', reason: 'UPSTREAM_COMMUNICATION_FAILURE_REUSED' }), /통신장애로 2시간 이내 이전 정상 관측값/);
+});
