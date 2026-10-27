@@ -1,4 +1,4 @@
-"""전달 ZIP의 튜닝 모델과 학습 당시 출력 복원 계수만 추출한다. 학습은 하지 않는다."""
+"""최신 튜닝 가중치와 노트북의 재학습 구간 출력 복원 계수를 저장한다. 학습하지 않는다."""
 
 import argparse
 import hashlib
@@ -9,14 +9,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from backend.model_predict import MODEL_VERSION
 from catboost import CatBoostRegressor
 
 TARGETS = ("visibility_km", "pm25", "pm10")
 OUTPUT = Path(__file__).resolve().parent / "models" / "forecast_tuned"
 
 
-def import_models(archive):
-    """원본 노트북의 train-only 리드 표준편차를 복원하고 모델과 함께 저장한다."""
+def import_models(archive, weights_directory, notebook):
+    """재학습(Train+Val) 리드 표준편차를 복원하고 검증한 모델을 저장한다."""
     with zipfile.ZipFile(archive) as bundle:
         entry = next(
             n for n in bundle.namelist() if n.endswith("mart_tide_anchor_obs.parquet")
@@ -29,16 +30,25 @@ def import_models(archive):
         grouped = [g.set_index("tm").asfreq("h") for _, g in data.groupby("stn_id")]
         metadata = {
             "name": "catboost_observation_forecast_tuned",
-            "archive_sha256": hashlib.sha256(Path(archive).read_bytes()).hexdigest(),
-            "recipe": "피처확인_관측예보_분석.ipynb cells 13, 14, 17, 19",
+            "version": MODEL_VERSION,
+            "observation_archive_sha256": hashlib.sha256(
+                Path(archive).read_bytes()
+            ).hexdigest(),
+            "observation_parquet_sha256": hashlib.sha256(
+                bundle.read(entry)
+            ).hexdigest(),
+            "recipe": "관측소별_저시정개선학습.ipynb cells 12, 15, 17 (refit Tuned)",
+            "recipe_sha256": hashlib.sha256(Path(notebook).read_bytes()).hexdigest(),
             "train_start": "2022-04-01",
-            "train_end_exclusive": "2024-04-01",
+            "train_end_exclusive": "2025-04-01",
             "transform": "log1p_residual_horizon_normalized",
+            "ensemble": "Tuned (Switch/Stacked weights not exported)",
             "targets": {},
         }
-        OUTPUT.mkdir(parents=True, exist_ok=True)
+        artifacts = {}
         for target in TARGETS:
             coefficients, clip_max = {}, None
+            sample_count = 0
             for h in range(1, 49):
                 residuals = []
                 for g in grouped:
@@ -55,6 +65,7 @@ def import_models(archive):
                         np.log1p(np.maximum(y[valid].astype(float), 0))
                         - np.log1p(np.maximum(cur[valid].astype(float), 0))
                     )
+                    sample_count += int(valid.sum())
                     if target == "visibility_km":
                         # 상한은 현재값 결측 여부와 무관한 train 타깃 전체의 최대값이다.
                         train = (g.index >= metadata["train_start"]) & (
@@ -67,29 +78,33 @@ def import_models(archive):
                 if not np.isfinite(sigma):
                     raise ValueError(f"복원 계수의 자료 부족: {target} h={h}")
                 coefficients[str(h)] = max(sigma, 1e-6)
-            entry = next(
-                n for n in bundle.namelist() if n.endswith(f"/cb_tuned_{target}.cbm")
-            )
-            model_bytes = bundle.read(entry)
+            if sample_count != 3_136_858:
+                raise ValueError(
+                    f"노트북 재학습 표본 수 불일치: {target} / {sample_count}"
+                )
+            model_bytes = (
+                Path(weights_directory) / f"cb_tuned_{target}.cbm"
+            ).read_bytes()
             model = CatBoostRegressor().load_model(blob=model_bytes)
+            if len(model.feature_names_) != 89:
+                raise ValueError("최신 모델은 89개 입력이어야 합니다.")
             if "features" in metadata and metadata["features"] != model.feature_names_:
                 raise ValueError("튜닝 모델들의 입력 순서가 다릅니다.")
             metadata["features"] = model.feature_names_
             filename = f"cb_tuned_{target}.cbm"
-            path = OUTPUT / filename
-            if path.exists() and path.read_bytes() != model_bytes:
-                raise FileExistsError(f"기존 모델 덮어쓰기 금지: {filename}")
-            path.write_bytes(model_bytes)
+            artifacts[filename] = model_bytes
             metadata["targets"][target] = {
                 "file": filename,
                 "sha256": hashlib.sha256(model_bytes).hexdigest(),
                 "sigma_by_h": coefficients,
                 "clip_max": clip_max,
+                "refit_sample_count": sample_count,
             }
+        OUTPUT.mkdir(parents=True, exist_ok=True)
+        for filename, blob in artifacts.items():
+            (OUTPUT / filename).write_bytes(blob)
         path = OUTPUT / "metadata.json"
         text = json.dumps(metadata, ensure_ascii=False, indent=2) + "\n"
-        if path.exists() and path.read_text(encoding="utf-8") != text:
-            raise FileExistsError("기존 모델 메타데이터 덮어쓰기 금지")
         path.write_text(text, encoding="utf-8")
     return metadata
 
@@ -97,7 +112,10 @@ def import_models(archive):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
-    info = import_models(parser.parse_args().archive)
+    parser.add_argument("weights_directory", type=Path)
+    parser.add_argument("notebook", type=Path)
+    args = parser.parse_args()
+    info = import_models(args.archive, args.weights_directory, args.notebook)
     print(
         json.dumps(
             {

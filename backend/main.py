@@ -16,15 +16,19 @@ from backend.live_observations import (
     observation_history,
     refresh_observations,
 )
+from backend.logging_utils import configure_logging
 from backend.model_predict import (
     METADATA_PATH,
     MODEL_PATHS,
+    MODEL_VERSION,
     predict_visibility_pm,
     read_model_history,
 )
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+configure_logging()
 
 app = FastAPI(title="WeatherElfs Backend API", version="0.1.0")
 
@@ -735,9 +739,11 @@ def station_dashboard(
                 else refresh_observations(station_id, horizons=horizons)
             )
         except CollectionError as exc:
-            print(
-                f"최신 수집 실패: {exc.source} / {exc.reason} / {type(exc.__cause__).__name__}",
-                flush=True,
+            logging.getLogger("uvicorn.error").error(
+                "최신 수집 실패: %s / %s / %s",
+                exc.source,
+                exc.reason,
+                type(exc.__cause__).__name__,
             )
             return JSONResponse(
                 status_code=409 if exc.source == "REQUEST" else 503,
@@ -834,6 +840,11 @@ def station_dashboard(
             airkorea = (
                 format_airkorea(latest["AIRKOREA"]) if latest["AIRKOREA"] else None
             )
+            selected_pm = collection.get("airkorea_pm", {})
+            if airkorea:
+                for field in ("pm25", "pm10"):
+                    if field in selected_pm:
+                        airkorea[f"{field}_ug_m3"] = selected_pm[field]["value"]
             marine = (
                 format_marine(latest["TIDE_OBSERVATORY"])
                 if latest["TIDE_OBSERVATORY"]
@@ -895,7 +906,7 @@ def station_dashboard(
             },
         )
     except Exception as e:
-        print("입력 구성 오류:", type(e).__name__, flush=True)
+        logging.getLogger("uvicorn.error").error("입력 구성 오류: %s", type(e).__name__)
         return JSONResponse(
             status_code=503,
             content={
@@ -1053,6 +1064,11 @@ def station_dashboard(
                         for source in (collection or {}).get("errors", {})
                         if source in ("ASOS", "AIRKOREA", "TIDE_OBSERVATORY")
                     }
+                    | {
+                        source
+                        for source in (collection or {}).get("reused_sources", [])
+                        if source in ("KMA_FORECAST", "AIRKOREA_FORECAST")
+                    }
                 )
                 predicted_visibility = values["visibility_km"]
 
@@ -1110,10 +1126,8 @@ def station_dashboard(
                 )
 
             except Exception as e:
-                print(
-                    f"CatBoost {h}시간 예측 오류:",
-                    repr(e),
-                    flush=True,
+                logging.getLogger("uvicorn.error").error(
+                    "CatBoost %s시간 예측 오류: %s", h, type(e).__name__
                 )
                 real_forecast_timeline.append(
                     {
@@ -1184,14 +1198,54 @@ def station_dashboard(
             )
         for source in source_status:
             if source["source"] in collection.get("errors", {}):
+                pm = collection.get("airkorea_pm", {})
+                reused_air = (
+                    source["source"] == "AIRKOREA"
+                    and all(
+                        pm.get(field, {}).get("value") is not None
+                        for field in ("pm25", "pm10")
+                    )
+                    and any(
+                        pm.get(field, {}).get("reused") for field in ("pm25", "pm10")
+                    )
+                )
+                reused_observation = source["source"] in collection.get(
+                    "reused_sources", []
+                ) and all(
+                    source["source"] not in f.get("missing_sources", [])
+                    for f in forecast_inputs.values()
+                )
                 source.update(
                     status=(
-                        "partial"
-                        if source.get("observed_at") or source.get("issued_at")
-                        else "missing"
+                        "delayed"
+                        if reused_air or reused_observation
+                        else (
+                            "partial"
+                            if source.get("observed_at") or source.get("issued_at")
+                            else "missing"
+                        )
                     ),
-                    reason=collection["errors"][source["source"]],
+                    reason=(
+                        (
+                            "UPSTREAM_COMMUNICATION_FAILURE_REUSED"
+                            if collection["errors"][source["source"]]
+                            == "UPSTREAM_COMMUNICATION_FAILURE"
+                            else "PREVIOUS_OBSERVATION_USED"
+                        )
+                        if reused_air or reused_observation
+                        else collection["errors"][source["source"]]
+                    ),
                 )
+                if reused_air:
+                    source["observed_at"] = collection["model_input_observed_at"][
+                        "AIRKOREA"
+                    ]
+                    observed = datetime.fromisoformat(source["observed_at"]).replace(
+                        tzinfo=None
+                    )
+                    source["age_minutes"] = int(
+                        (reference_time - observed).total_seconds() / 60
+                    )
         first = next(
             (
                 f
@@ -1295,6 +1349,30 @@ def station_dashboard(
                 "pm25_ug_m3": (
                     display_airkorea["pm25_ug_m3"] if display_airkorea else None
                 ),
+                "pm25_observed_at": (
+                    collection.get("airkorea_pm", {}).get("pm25", {}).get("observed_at")
+                    if collection
+                    else None
+                ),
+                "pm10_observed_at": (
+                    collection.get("airkorea_pm", {}).get("pm10", {}).get("observed_at")
+                    if collection
+                    else None
+                ),
+                "pm25_reused": (
+                    collection.get("airkorea_pm", {})
+                    .get("pm25", {})
+                    .get("reused", False)
+                    if collection
+                    else False
+                ),
+                "pm10_reused": (
+                    collection.get("airkorea_pm", {})
+                    .get("pm10", {})
+                    .get("reused", False)
+                    if collection
+                    else False
+                ),
                 "aqi": current_aqi,
             },
             "marine": marine,
@@ -1324,6 +1402,8 @@ def station_dashboard(
                     if is_mock
                     else {
                         "name": "catboost_observation_forecast_tuned",
+                        "version": MODEL_VERSION,
+                        "feature_count": 89,
                         "transform": "expm1(log1p(current) + predicted_residual * sigma[h])",
                         "missing_features": sorted(missing_features),
                         "origin_at": row["tm"].replace(tzinfo=KST).isoformat(),

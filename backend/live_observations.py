@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from backend.forecast_inputs import collect_air, collect_kma, match_forecasts
 from backend.ingest_asos import prepare_records, validate_csv
+from backend.logging_utils import log_json, response_snapshot
 
 from backend_airkorea_test.ingest_airkorea import prepare_records as prepare_air_records
 from src.collectors.api import airkorea_collector, asos_collector
@@ -35,6 +36,9 @@ FORECAST_SOURCES = ("KMA_FORECAST", "AIRKOREA_FORECAST")
 SOURCES = (*OBSERVATION_SOURCES, *FORECAST_SOURCES)
 _sessions = OrderedDict()
 _sessions_lock = Lock()
+_air_cache = {}
+_air_cache_lock = Lock()
+_observation_cache = {}
 MARINE_URL = "https://apis.data.go.kr/1192136/dtRecent/GetDTRecentApiService"
 # 국립해양조사원 공식 활용가이드의 관측소 목록. 기존 모델의 지점 매핑을 유지한다.
 STATIONS = {
@@ -76,7 +80,7 @@ def collect_asos(station_id, now):
     end = now.replace(minute=0, second=0, microsecond=0)
     rows = asos_collector.fetch_period_data(
         int(station_id),
-        (end - timedelta(hours=24)).strftime("%Y%m%d%H%M"),
+        (end - timedelta(hours=72)).strftime("%Y%m%d%H%M"),
         end.strftime("%Y%m%d%H%M"),
         key,
         max_retries=1,
@@ -93,14 +97,14 @@ def collect_asos(station_id, now):
     return records
 
 
-def collect_airkorea(station_id, now):
+def collect_airkorea(station_id, now, *, on_response=None):
     """선택 측정소의 시간별 자료를 수집하고 기존 적재 스키마로 검증한다."""
     key = os.getenv("AIRKOREA_API_KEY") or os.getenv("DATA_API_KEY")
     if not key:
         raise CollectionError("AIRKOREA", "API_KEY_MISSING")
     name = STATIONS[station_id][0]
     rows = airkorea_collector.normalize(
-        name, airkorea_collector.fetch(name, key, retries=1)
+        name, airkorea_collector.fetch(name, key, retries=1, on_response=on_response)
     )
     with TemporaryDirectory() as temp:
         path = Path(temp) / "airkorea.csv"
@@ -110,7 +114,7 @@ def collect_airkorea(station_id, now):
     return [row for row in records if row["tm"] <= now.replace(tzinfo=None)]
 
 
-def collect_marine(station_id, now):
+def collect_marine(station_id, now, *, on_response=None):
     """승인된 KHOA API로 기존 모델 지점의 시간별 해양 자료를 수집한다."""
     key = os.getenv("DATA_API_KEY")
     if not key:
@@ -145,6 +149,8 @@ def collect_marine(station_id, now):
                 logging.getLogger("uvicorn.error").warning(
                     "해양 API 일시 통신 실패: %s / 1회 재시도", type(exc).__name__
                 )
+        if on_response:
+            on_response(payload)
         if str(payload.get("header", {}).get("resultCode")) != "00":
             raise CollectionError("TIDE_OBSERVATORY", "UPSTREAM_ERROR")
         body = payload.get("body", {})
@@ -197,6 +203,58 @@ def validate_records(records, now, source):
     require_fresh(max(row["tm"] for row in records).replace(tzinfo=KST), now, source)
 
 
+def select_air_pm(records, previous_records, origin, now, *, source_reused=False):
+    """관측 시각을 보존하며 항목별 마지막 정상값을 최대 2시간까지 사용한다."""
+    latest = max((row["tm"] for row in records if row["tm"] <= origin), default=None)
+    candidates = [(row, False) for row in records] + [
+        (row, True) for row in previous_records
+    ]
+    selected = {}
+    for field in ("pm25", "pm10"):
+        valid = [
+            (row, cached)
+            for row, cached in candidates
+            if row["tm"] <= origin
+            and timedelta(0) <= now.replace(tzinfo=None) - row["tm"] <= MAX_AGE
+            and row.get(field) is not None
+            and math.isfinite(row[field])
+            and row[field] >= 0
+        ]
+        if valid:
+            row, cached = max(valid, key=lambda item: item[0]["tm"])
+            selected[field] = {
+                "value": row[field],
+                "observed_at": row["tm"].replace(tzinfo=KST).isoformat(),
+                "reused": source_reused
+                or cached
+                or (latest is not None and row["tm"] < latest),
+            }
+        else:
+            selected[field] = {"value": None, "observed_at": None, "reused": False}
+    return selected
+
+
+def airkorea_communication_failure(document, now):
+    """최신 관측 행의 미세먼지 통신장애 표기만 판단한다."""
+    try:
+        items = document["response"]["body"]["items"]
+        items = [items] if isinstance(items, dict) else items
+        dated = []
+        for item in items:
+            try:
+                observed = datetime.strptime(item.get("dataTime", ""), "%Y-%m-%d %H:%M")
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if observed <= now.replace(tzinfo=None):
+                dated.append((observed, item))
+        if not dated:
+            return False
+        item = max(dated, key=lambda row: row[0])[1]
+        return any(item.get(field) == "통신장애" for field in ("pm25Flag", "pm10Flag"))
+    except (KeyError, TypeError):
+        return False
+
+
 def refresh_observations(
     station_id, horizons=(3, 6, 9, 12), *, collection_id=None, retry_source=None
 ):
@@ -224,6 +282,8 @@ def refresh_observations(
                     "horizons": tuple(horizons),
                     "records": dict.fromkeys(SOURCES),
                     "errors": {},
+                    "response_samples": {},
+                    "reused_sources": [],
                     "fetched_at": {},
                     "requested_at": now.isoformat(),
                     "expires_at": (
@@ -248,12 +308,28 @@ def refresh_observations(
             "KMA_FORECAST": collect_kma,
             "AIRKOREA_FORECAST": collect_air,
         }
+        with _air_cache_lock:
+            previous_air = deepcopy(_air_cache.get(station_id, []))
+        air_source_reused = state.get("air_source_reused", False)
 
         def collect(sources):
+            nonlocal air_source_reused
             pool = ThreadPoolExecutor(max_workers=len(sources))
             try:
                 futures = {}
                 for source in sources:
+                    samples = []
+                    state["response_samples"][source] = samples
+                    if source == "AIRKOREA":
+                        state["airkorea_communication_failure"] = False
+
+                    def capture(document, source=source, samples=samples):
+                        samples.append(response_snapshot(document, source))
+                        if source == "AIRKOREA":
+                            state["airkorea_communication_failure"] = (
+                                airkorea_communication_failure(document, now)
+                            )
+
                     args = (
                         (station_id, now)
                         if source in OBSERVATION_SOURCES
@@ -263,7 +339,8 @@ def refresh_observations(
                             else (state["base_time"],)
                         )
                     )
-                    futures[source] = pool.submit(collectors[source], *args)
+                    kwargs = {"on_response": capture} if source != "ASOS" else {}
+                    futures[source] = pool.submit(collectors[source], *args, **kwargs)
                 _, pending = wait(futures.values(), timeout=COLLECTION_PHASE_SECONDS)
                 for source, future in futures.items():
                     try:
@@ -276,6 +353,65 @@ def refresh_observations(
                         elif not rows:
                             raise CollectionError(source, "EMPTY_DATA")
                         state["records"][source] = rows
+                        if source == "AIRKOREA":
+                            air_source_reused = False
+                            state["air_source_reused"] = False
+                            with _air_cache_lock:
+                                merged = {
+                                    row["tm"]: deepcopy(row)
+                                    for row in _air_cache.get(station_id, [])
+                                }
+                                for row in rows:
+                                    old = merged.get(row["tm"], {})
+                                    merged[row["tm"]] = {
+                                        key: (
+                                            old.get(key)
+                                            if value is None
+                                            and old.get(key) is not None
+                                            else value
+                                        )
+                                        for key, value in row.items()
+                                    }
+                                _air_cache[station_id] = sorted(
+                                    merged.values(),
+                                    key=lambda row: row["tm"],
+                                    reverse=True,
+                                )[:72]
+                        elif source in OBSERVATION_SOURCES:
+                            with _air_cache_lock:
+                                saved = deepcopy(
+                                    _observation_cache.get((station_id, source))
+                                )
+                                if (
+                                    saved
+                                    and timedelta(0) <= now - saved[1] <= MAX_AGE
+                                    and timedelta(0)
+                                    <= now.replace(tzinfo=None)
+                                    - max(r["tm"] for r in saved[0])
+                                    <= MAX_AGE
+                                    and max(r["tm"] for r in saved[0])
+                                    > max(r["tm"] for r in rows)
+                                ):
+                                    state["records"][source] = saved[0]
+                                    state["errors"][
+                                        source
+                                    ] = "PREVIOUS_OBSERVATION_USED"
+                                    state["fetched_at"][source] = saved[1].isoformat()
+                                    if source not in state["reused_sources"]:
+                                        state["reused_sources"].append(source)
+                                    continue
+                                _observation_cache[(station_id, source)] = (
+                                    deepcopy(rows),
+                                    datetime.now(KST),
+                                )
+                        else:
+                            with _air_cache_lock:
+                                _observation_cache[(station_id, source)] = (
+                                    deepcopy(rows),
+                                    datetime.now(KST),
+                                )
+                        if source in state["reused_sources"]:
+                            state["reused_sources"].remove(source)
                         state["errors"].pop(source, None)
                         state["fetched_at"][source] = datetime.now(KST).isoformat()
                     except Exception as exc:
@@ -289,11 +425,56 @@ def refresh_observations(
                                 else "COLLECTION_FAILED"
                             )
                         )
+                        if source == "AIRKOREA":
+                            cached = [
+                                r
+                                for r in previous_air
+                                if timedelta(0)
+                                <= now.replace(tzinfo=None) - r["tm"]
+                                <= MAX_AGE
+                            ]
+                            if cached:
+                                state["records"][source] = deepcopy(previous_air)
+                                air_source_reused = True
+                                state["air_source_reused"] = True
+                        else:
+                            with _air_cache_lock:
+                                saved = deepcopy(
+                                    _observation_cache.get((station_id, source))
+                                )
+                            if saved and timedelta(0) <= now - saved[1] <= MAX_AGE:
+                                cached, fetched_at = saved
+                                try:
+                                    if source in OBSERVATION_SOURCES:
+                                        validate_records(cached, now, source)
+                                except CollectionError:
+                                    pass
+                                else:
+                                    state["records"][source] = cached
+                                    state["fetched_at"][source] = fetched_at.isoformat()
+                                    if source not in state["reused_sources"]:
+                                        state["reused_sources"].append(source)
                         logging.getLogger("uvicorn.error").warning(
                             "API 부분 실패: %s / %s / %s",
                             source,
                             state["errors"][source],
                             type(exc).__name__,
+                        )
+                        log_json(
+                            "[API 수집 오류 상세]",
+                            collection_id=collection_id,
+                            station_id=station_id,
+                            source=source,
+                            reason=state["errors"][source],
+                            error_type=type(exc).__name__,
+                            upstream_reason=(
+                                getattr(exc, "reason", None)
+                                if isinstance(getattr(exc, "reason", None), str)
+                                else None
+                            ),
+                            http_status=getattr(exc, "code", None)
+                            or getattr(exc.__cause__, "code", None),
+                            response_json=state["response_samples"][source],
                         )
             finally:
                 pool.shutdown(wait=False, cancel_futures=True)
@@ -326,10 +507,7 @@ def refresh_observations(
                 errors.setdefault(source, exc.reason)
                 rows = []
             observations[source] = rows
-            baseline_fields = {
-                "ASOS": ("visibility",),
-                "AIRKOREA": ("pm25", "pm10"),
-            }.get(source, ())
+            baseline_fields = {"ASOS": ("visibility",)}.get(source, ())
             if rows and any(
                 max(rows, key=lambda r: r["tm"]).get(field) is None
                 for field in baseline_fields
@@ -340,6 +518,36 @@ def refresh_observations(
                 if rows
                 else None
             )
+        selected_pm = select_air_pm(
+            observations["AIRKOREA"],
+            previous_air,
+            state["base_time"],
+            now,
+            source_reused=air_source_reused,
+        )
+        if any(item["value"] is None for item in selected_pm.values()):
+            errors.setdefault(
+                "AIRKOREA",
+                (
+                    "UPSTREAM_COMMUNICATION_FAILURE"
+                    if state.get("airkorea_communication_failure")
+                    else "BASELINE_MISSING"
+                ),
+            )
+        elif any(item["reused"] for item in selected_pm.values()):
+            errors.setdefault(
+                "AIRKOREA",
+                (
+                    "UPSTREAM_COMMUNICATION_FAILURE"
+                    if state.get("airkorea_communication_failure")
+                    else "PREVIOUS_OBSERVATION_USED"
+                ),
+            )
+        used_times = [
+            item["observed_at"] for item in selected_pm.values() if item["observed_at"]
+        ]
+        if used_times:
+            aligned_times["AIRKOREA"] = min(used_times)
         forecasts = match_forecasts(
             state["records"]["KMA_FORECAST"] or [],
             state["records"]["AIRKOREA_FORECAST"] or [],
@@ -351,6 +559,105 @@ def refresh_observations(
             for source in forecast["missing_sources"]:
                 errors.setdefault(source, "TARGET_TIME_MISSING_OR_STALE")
         state["retryable_sources"] = [source for source in SOURCES if source in errors]
+        for source, reason in errors.items():
+            records = state["records"][source] or []
+            details = []
+            if source in FORECAST_SOURCES:
+                fields = (
+                    (
+                        "future_fcst_temp",
+                        "future_fcst_humidity",
+                        "future_fcst_wind_speed",
+                        "future_fcst_wind_dir",
+                        "future_fcst_precipitation",
+                        "future_fcst_pop",
+                        "future_fcst_pty",
+                        "future_fcst_sky",
+                    )
+                    if source == "KMA_FORECAST"
+                    else ("future_fcst_pm25_grade",)
+                )
+                for h, forecast in forecasts.items():
+                    if source not in forecast["missing_sources"]:
+                        continue
+                    target = state["base_time"] + timedelta(hours=h)
+                    target_key = (
+                        "fcst_time_kst" if source == "KMA_FORECAST" else "target_date"
+                    )
+                    target_value = target if source == "KMA_FORECAST" else target.date()
+                    matching = [
+                        row for row in records if row.get(target_key) == target_value
+                    ]
+                    issued_key = (
+                        "base_time_kst" if source == "KMA_FORECAST" else "announce_time"
+                    )
+                    latest = max((row[issued_key] for row in matching), default=None)
+                    max_age_h = 6 if source == "KMA_FORECAST" else 24
+                    cause = state["errors"].get(source) or (
+                        "TARGET_NOT_PROVIDED"
+                        if not matching
+                        else (
+                            "FORECAST_TOO_OLD"
+                            if latest
+                            and state["base_time"] - latest > timedelta(hours=max_age_h)
+                            else "NO_USABLE_TARGET_VALUES"
+                        )
+                    )
+                    details.append(
+                        {
+                            "horizon_h": h,
+                            "target_at": forecast["valid_at"],
+                            "cause": cause,
+                            "latest_received_issued_at": latest,
+                            "matching_response_count": len(matching),
+                            "missing_fields": [
+                                key
+                                for key in fields
+                                if not math.isfinite(
+                                    forecast["values"].get(key, float("nan"))
+                                )
+                            ],
+                            "input_values": {
+                                key: forecast["values"].get(key) for key in fields
+                            },
+                        }
+                    )
+            else:
+                latest = max(
+                    observations[source], key=lambda row: row["tm"], default={}
+                )
+                required = {"ASOS": ("visibility",), "AIRKOREA": ("pm25", "pm10")}.get(
+                    source, ()
+                )
+                details.append(
+                    {
+                        "observed_at": latest.get("tm"),
+                        "missing_fields": [
+                            key for key in required if latest.get(key) is None
+                        ],
+                        "input_values": latest,
+                    }
+                )
+            log_json(
+                "[API 누락 상세]",
+                collection_id=collection_id,
+                station_id=station_id,
+                source=source,
+                reason=reason,
+                origin_at=state["base_time"],
+                fetched_at=state["fetched_at"].get(source),
+                received_count=len(records),
+                response_json=state["response_samples"].get(source, []),
+                reused_source=source in state["reused_sources"]
+                or (source == "AIRKOREA" and air_source_reused),
+                normalized_records=(
+                    sorted(records, key=lambda row: row["tm"], reverse=True)[:3]
+                    if source in OBSERVATION_SOURCES
+                    else records
+                ),
+                selected_pm=selected_pm if source == "AIRKOREA" else None,
+                missing_details=details,
+            )
         logging.getLogger("uvicorn.error").info(
             "[API 수집 완료] 관측소 %s / 재시도 %s / 누락 %s",
             station_id,
@@ -369,6 +676,8 @@ def refresh_observations(
                 "errors": errors,
                 "retryable_sources": state["retryable_sources"],
                 "model_input_observed_at": aligned_times,
+                "airkorea_pm": selected_pm,
+                "reused_sources": state["reused_sources"],
                 "collected_rows": {
                     s: len(rows or []) for s, rows in state["records"].items()
                 },
@@ -381,6 +690,7 @@ def refresh_observations(
 def observation_history(observations, origin):
     """기존 DB의 정확한 시각 조인과 동일하게 결측 시간을 보간하지 않는다."""
     air = {row["tm"]: row for row in observations["AIRKOREA"]}
+    marine = {row["tm"]: row for row in observations.get("TIDE_OBSERVATORY", [])}
     return [
         {
             "tm": row["tm"],
@@ -389,9 +699,14 @@ def observation_history(observations, origin):
             ),
             "humidity": row.get("humidity"),
             "pressure": row.get("sea_press"),
+            "temperature": row.get("temp"),
+            "dewpoint": row.get("dew_point"),
+            "wind_speed": row.get("wind_speed"),
+            "precipitation": 0.0 if row.get("rainfall") is None else row["rainfall"],
+            "sea_temp": marine.get(row["tm"], {}).get("water_temp"),
             "pm25": air.get(row["tm"], {}).get("pm25"),
             "pm10": air.get(row["tm"], {}).get("pm10"),
         }
         for row in observations["ASOS"]
-        if origin - timedelta(hours=24) <= row["tm"] <= origin
+        if origin - timedelta(hours=72) <= row["tm"] <= origin
     ]

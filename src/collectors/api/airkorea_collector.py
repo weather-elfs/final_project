@@ -3,13 +3,16 @@
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
 import pandas as pd
 
 URL = (
@@ -43,7 +46,7 @@ def number(value):
         return None
 
 
-def fetch(name, key, retries):
+def fetch(name, key, retries, *, on_response=None):
     params = {
         "serviceKey": key,
         "returnType": "json",
@@ -57,10 +60,13 @@ def fetch(name, key, retries):
         URL + "?" + urllib.parse.urlencode(params),
         headers={"User-Agent": "WeatherElfs-AirKoreaCollector/1.0"},
     )
+    last_error = None
     for attempt in range(1, retries + 1):
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 payload = json.loads(response.read().decode("utf-8-sig"))
+            if on_response:
+                on_response(payload)
             response = payload.get("response", {})
             header = response.get("header", {})
             if str(header.get("resultCode")) not in ("00", "0"):
@@ -70,14 +76,34 @@ def fetch(name, key, retries):
                 items = [items]
             if not isinstance(items, list):
                 raise ValueError("응답 items 형식 오류")
-            print(f"[{name}] 원본 {len(items)}건")
+            logging.getLogger(__name__).info("[%s] 원본 %s건", name, len(items))
             return items
         except Exception as error:
+            last_error = error
+            if on_response and isinstance(error, urllib.error.HTTPError):
+                try:
+                    document = json.loads(error.read(16384))
+                except (ValueError, OSError):
+                    document = {
+                        "response": {
+                            "header": {
+                                "resultCode": error.code,
+                                "resultMsg": "HTTP 오류: JSON 응답 없음",
+                            }
+                        }
+                    }
+                on_response(document)
             # 인증키가 포함된 전체 요청 URL을 로그에 출력하지 않음
-            print(f"[{name}] 요청 실패 ({attempt}/{retries}): {type(error).__name__}")
+            logging.getLogger(__name__).warning(
+                "[%s] 요청 실패 (%s/%s): %s",
+                name,
+                attempt,
+                retries,
+                type(error).__name__,
+            )
             if attempt < retries:
                 time.sleep(2 * attempt)
-    raise RuntimeError(f"{name} 측정소 수집 실패")
+    raise RuntimeError(f"{name} 측정소 수집 실패") from last_error
 
 
 def normalize(name, items):
@@ -147,6 +173,7 @@ def collect(key, output, retries):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--realtime", action="store_true", help="1회 수집 (기본값)")
     parser.add_argument("--loop", action="store_true", help="반복 수집")

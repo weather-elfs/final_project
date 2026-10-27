@@ -46,7 +46,7 @@ class ForecastError(ValueError):
         self.source, self.reason = source, reason
 
 
-def request_items(url, params, *, timeout=15):
+def request_items(url, params, *, timeout=15, on_response=None):
     """페이지 전체의 시간 제한 안에서 정상 응답·완전성을 검증한다."""
     records = []
     deadline = monotonic() + timeout
@@ -55,8 +55,28 @@ def request_items(url, params, *, timeout=15):
         if remaining <= 0:
             raise TimeoutError()
         query = urllib.parse.urlencode({**params, "pageNo": page})
-        with urllib.request.urlopen(url + "?" + query, timeout=remaining) as response:
-            document = json.load(response)
+        try:
+            with urllib.request.urlopen(
+                url + "?" + query, timeout=remaining
+            ) as response:
+                document = json.load(response)
+        except urllib.error.HTTPError as exc:
+            if on_response:
+                try:
+                    document = json.loads(exc.read(16384))
+                except (ValueError, OSError):
+                    document = {
+                        "response": {
+                            "header": {
+                                "resultCode": exc.code,
+                                "resultMsg": "HTTP 오류: JSON 응답 없음",
+                            }
+                        }
+                    }
+                on_response(document)
+            raise
+        if on_response:
+            on_response(document)
         if not isinstance(document, dict) or not isinstance(
             document.get("response"), dict
         ):
@@ -96,7 +116,7 @@ def precipitation(value):
     return float(value)
 
 
-def collect_kma(station_id, origin):
+def collect_kma(station_id, origin, *, on_response=None):
     """공공데이터 실패 시 API허브에서 같은 발표·격자의 예보를 검증한다."""
     base = latest_forecast_base(origin.replace(tzinfo=KST))
     nx, ny = GRIDS[station_id]
@@ -123,7 +143,9 @@ def collect_kma(station_id, origin):
         if not key:
             continue
         try:
-            items = request_items(url, {**params, key_name: key}, timeout=timeout)
+            items = request_items(
+                url, {**params, key_name: key}, timeout=timeout, on_response=on_response
+            )
             rows = normalize_kma_items(items, origin, base, nx, ny)
             logging.getLogger("uvicorn.error").info(
                 "[기상청 예보 수신] 경로 %s / 관측소 %s / 발표 %s / %s시간",
@@ -194,7 +216,7 @@ def normalize_kma_items(items, origin, base, nx, ny):
     return list(rows.values())
 
 
-def collect_air(origin):
+def collect_air(origin, *, on_response=None):
     """관측시각 이전 발표된 인천 PM2.5 예보 등급만 수집한다."""
     key = os.getenv("AIRKOREA_API_KEY") or os.getenv("DATA_API_KEY")
     if not key:
@@ -211,6 +233,7 @@ def collect_air(origin):
                 "searchDate": day.strftime("%Y-%m-%d"),
                 "informCode": "PM25",
             },
+            on_response=on_response,
         )
         for item in items:
             if item.get("informCode") != "PM25":
