@@ -207,6 +207,7 @@ export interface DashboardViewProps {
   mapTilesEnabled?: boolean;
   values: MissionValues;
   forecastRequested?: boolean;
+  forecastLoading?: boolean;
   loading?: boolean;
   error?: string;
   onChange: (key: MissionValueKey, value: MissionValue) => void;

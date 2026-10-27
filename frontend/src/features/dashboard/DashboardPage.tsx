@@ -22,6 +22,7 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   const [values, setValues] = useState<MissionValues>(EMPTY_VALUES);
   const [forecastRequested, setForecastRequested] = useState(false);
+  const [forecastLoading, setForecastLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [retryingSource, setRetryingSource] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
         setConfig(nextConfig);
 
         const stationId = nextConfig.stations.find((station) => station.id === '112')?.id ?? nextConfig.stations[0]?.id;
+        if (stationId) setValues((current) => ({ ...current, stationId }));
         const forecastIntervalH = nextConfig.forecastIntervalOptionsH.includes(6) ? 6 : nextConfig.forecastIntervalOptionsH[0];
         const missionType = nextConfig.missionTypes[0]?.missionType;
         if (stationId && forecastIntervalH && missionType) {
@@ -84,15 +86,6 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
     return () => controller.abort();
   }, [mapViewport]);
 
-  useEffect(() => {
-    if (!mapViewport) return;
-    const visibleStationIds = new Set(stationsInViewport(config.stations, mapViewport).map((station) => station.id));
-    setValues((current) => {
-      if (!current.stationId || visibleStationIds.has(current.stationId)) return current;
-      return { ...current, stationId: '' };
-    });
-  }, [config.stations, mapViewport]);
-
   const fallbackRequest = (stationId = values.stationId || dashboard?.station?.stationId || config.stations[0]?.id) => {
     const forecastIntervalH = values.forecastIntervalH || (config.forecastIntervalOptionsH.includes(6) ? 6 : config.forecastIntervalOptionsH[0]);
     const missionType = values.missionType || config.missionTypes[0]?.missionType;
@@ -113,11 +106,16 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const request = fallbackRequest();
-    if (!request || !values.stationId || !values.forecastIntervalH || !values.missionType) return;
+    if (loading || retryingSource || !request || !values.stationId || !values.forecastIntervalH || !values.missionType) return;
     setForecastRequested(true);
-    void loadDashboard(request);
+    setForecastLoading(true);
+    try {
+      await loadDashboard(request);
+    } finally {
+      setForecastLoading(false);
+    }
   };
 
   const handleRetrySource = async (source: string) => {
@@ -164,5 +162,5 @@ export default function DashboardPage({ centerId, mapTilesEnabled = true, onUnau
     setValues((current) => ({ ...current, [key]: value } as MissionValues));
   };
 
-  return <DashboardView centerId={centerId} config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} loading={loading} retryingSource={retryingSource} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onRetrySource={handleRetrySource} onSubmit={handleSubmit} onLogout={onUnauthorized} />;
+  return <DashboardView centerId={centerId} config={config} missionStations={visibleStations} dashboard={dashboard} mapMode={mapMode} mapTilesEnabled={mapTilesEnabled} values={values} forecastRequested={forecastRequested} forecastLoading={forecastLoading} loading={loading} retryingSource={retryingSource} error={error} onChange={handleChange} onMapModeChange={handleMapModeChange} onMapViewportChange={handleMapViewportChange} onStationSelect={handleStationSelect} onRefresh={handleRefresh} onRetrySource={handleRetrySource} onSubmit={handleSubmit} onLogout={onUnauthorized} />;
 }

@@ -57,6 +57,7 @@ export default function DashboardView({
   mapTilesEnabled = true,
   values,
   forecastRequested = false,
+  forecastLoading = false,
   loading = false,
   retryingSource,
   error = '',
@@ -387,16 +388,18 @@ export default function DashboardView({
               <MissionConditionsForm
                 config={missionConfig}
                 values={values}
+                selectedStationName={selectedStation?.name ?? (dashboard?.station?.stationId === values.stationId ? dashboard.station.stationName : undefined)}
                 currentTime={liveReferenceTime}
                 forecastBaseTime={dashboard?.meta?.model?.originAt ?? dashboard?.current?.observedAt}
                 loading={loading || Boolean(retryingSource)}
+                submitting={forecastLoading}
                 onChange={onChange}
                 onSubmit={onSubmit}
               />
               <ForecastPanel
                 dashboard={dashboard}
                 requested={forecastRequested}
-                loading={loading}
+                loading={forecastLoading}
                 available={forecastAvailable}
               />
             </div>
