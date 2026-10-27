@@ -299,7 +299,7 @@ def fetch_hour(
     if window.start_dtm != window.end_dtm:
         raise ValueError("Hourly API start and end must be the same HH00")
     if not api_key:
-        raise ValueError("PM1_API_KEY is required")
+        raise ValueError("DATA_API_KEY is required")
     if opener is None:
         # 운영에서는 출처 제한 핸들러를 사용한다. opener 주입은 네트워크 없이
         # 고정 응답을 검증하는 테스트에서만 사용한다.

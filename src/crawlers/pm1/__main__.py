@@ -32,6 +32,7 @@ from src.crawlers.pm1.database import (
 DEFAULT_CSV_PATH = Path("data/processed/pm1/pm1_measurements.csv")
 COLLECTOR_VERSION = "pm1-crawler-v1"
 ENV_KEYS = {
+    "DATA_API_KEY",
     "PM1_API_KEY",
     "PM1_SOURCE_TIMEZONE",
     "PM1_SYNC_LAG_HOURS",
@@ -158,7 +159,9 @@ def run_collection(
     env: Mapping[str, str],
 ) -> int:
     """DB 체크포인트부터 종료 시각까지 PM1 데이터를 시간순으로 수집한다."""
-    api_key = _required(env, "PM1_API_KEY")
+    api_key = env.get("DATA_API_KEY", "").strip() or env.get("PM1_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Required environment variable is missing: DATA_API_KEY")
     source_timezone_text, source_timezone, sync_lag_hours = _time_contract(env)
     config = load_database_config("ingest", env)
 

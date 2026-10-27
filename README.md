@@ -100,7 +100,7 @@ export KMA_API_KEY DATA_API_KEY
 "$PROJECT_PYTHON" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-`KMA_AUTH_KEY`가 지정되면 ASOS 수집에 우선 사용한다. `AIRKOREA_API_KEY`를 별도로 설정하면 에어코리아 호출에 우선 사용하며, 없으면 `DATA_API_KEY`를 사용한다. 공공데이터포털 키는 기상청 단기예보·에어코리아·국립해양조사원 API 이용 권한이 필요하다. PM1 키 통합 변경이 반영되면 PM1 수집도 `DATA_API_KEY`를 사용하며 기존 `PM1_API_KEY`만 설정한 환경은 호환된다. `KMA_API_KEY`는 ASOS 및 단기예보 대체 경로에 필요한 API 허브 사용 권한이 필요하다. 인증값에 따라 실제 사용 가능 여부를 확인한다.
+`KMA_AUTH_KEY`가 지정되면 ASOS 수집에 우선 사용한다. `AIRKOREA_API_KEY`를 별도로 설정하면 에어코리아 호출에 우선 사용하며, 없으면 `DATA_API_KEY`를 사용한다. 공공데이터포털 키는 기상청 단기예보·에어코리아·국립해양조사원 API 이용 권한이 필요하다. PM1 수집도 `DATA_API_KEY`를 사용하며 기존 `PM1_API_KEY`만 설정한 환경은 호환된다. `KMA_API_KEY`는 ASOS 및 단기예보 대체 경로에 필요한 API 허브 사용 권한이 필요하다. 인증값에 따라 실제 사용 가능 여부를 확인한다.
 
 - 상태 확인: <http://127.0.0.1:8000/api/health>
 - Swagger: <http://127.0.0.1:8000/docs>
