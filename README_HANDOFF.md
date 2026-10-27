@@ -241,6 +241,26 @@ CSV 68 rows verified including normalization of three `24:00` timestamps; CatBoo
 
 ## Static checks
 
+### 수집 진단 로그 (2026-10-27)
+
+일시 오류 시 같은 관측소에서 이전에 정상 수집한 자료를 프로세스 메모리에서 최대 2시간 재사용한다.
+각 PM 항목은 실제 관측 시각이 조회 시각으로부터 2시간 이내인 마지막 유효값만 사용하며,
+`current.pm25_observed_at` / `pm10_observed_at`, `pm25_reused` / `pm10_reused`로 출처를 표시한다.
+시간별 원본 이력은 채워 넣지 않으며, NowCast도 실제 관측 이력만 사용한다. 이전 값 사용 시 예측은
+보완된 결과로 표시하고 임무 판정은 대기한다. 예보는 별도로 대상 시각 일치와 기존 발표 시각 기준을
+통과해야 한다. 메모리 캐시는 서버 재시작 시 비워지고 다른 워커와 공유되지 않는다.
+
+서버·접근·수집 로그는 KST 기준 `YYYYMMDD HHMMSS LEVEL: 메시지`로 출력한다.
+누락이 발생한 출처에는 `[API 누락 상세]` JSON을 추가한다. 같은 `collection_id`로 조회와 재시도를 묶어 확인한다.
+
+- `response_json`: 원천 응답에서 선별한 header·항목 필드. 관측은 요청별 최대 3행, 예보는 페이지별 최대 100행이며 전체 응답은 출력하지 않는다.
+- `normalized_records`: 모델 입력으로 정규화한 수집값. 관측은 최신 3행을 표시한다.
+- `missing_details`: 누락 필드·사용한 값·대상 시각. `TARGET_NOT_PROVIDED`는 대상 날짜/시각 미제공, `FORECAST_TOO_OLD`는 현재 유효 기준 초과, `NO_USABLE_TARGET_VALUES`는 대상 자료가 있으나 입력값으로 사용 불가다.
+- `[API 수집 오류 상세]`: 오류 종류·가능한 HTTP 상태·응답 header. 응답을 받기 전 실패하면 JSON 내용은 없을 수 있다.
+
+API 키·인증 헤더·비밀번호는 제거하고, JSON 숫자 결측은 `null`로 출력한다. 원천의 `-`·빈 문자열은 `response_json`에서 그대로 비교할 수 있다.
+발표 시각이 이르다는 이유만으로 누락 처리하지 않는다. 대상 날짜 유무와 출처별 유효 기준을 각각 확인한다.
+
 ```powershell
 python -m compileall -q backend backend_airkorea_test src/collectors/api
 python -m backend_airkorea_test.validate_airkorea_csv .\backend_airkorea_test\data\airkorea_latest.csv
