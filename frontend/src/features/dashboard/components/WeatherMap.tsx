@@ -305,6 +305,8 @@ export default function WeatherMap({
     >
       <div className='map-viewport'>
         <MapContainer
+          // Leaflet 1.9의 확대 완료 타이머가 화면 이동 후 제거된 지도를 참조하지 않게 한다.
+          zoomAnimation={false}
           center={INITIAL_CENTER}
           zoom={INITIAL_ZOOM}
           minZoom={6}
