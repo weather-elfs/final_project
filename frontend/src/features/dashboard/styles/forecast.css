@@ -143,20 +143,11 @@
   height: auto;
   padding: 0.25rem 0.4375rem;
   border-radius: 0.25rem;
-  background: #f1f3f6;
-  color: #525b65;
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1.25;
   white-space: nowrap;
 }
-
-.weather-ui .forecast-stage-badge.grade-tone-sky { background: #eaf5fc; color: #356783; }
-.weather-ui .forecast-stage-badge.grade-tone-yellow { background: #fff7df; color: #865b12; }
-.weather-ui .forecast-stage-badge.grade-tone-orange { background: #fff0e5; color: #954718; }
-.weather-ui .forecast-stage-badge.grade-tone-red { background: #fdebf0; color: #922c45; }
-.weather-ui .forecast-stage-badge.grade-tone-purple { background: #f2edf9; color: #67468e; }
-.weather-ui .forecast-stage-badge.grade-tone-maroon { background: #f7e8ed; color: #7d2941; }
 
 .weather-ui .forecast-grade-description {
   color: var(--text);
